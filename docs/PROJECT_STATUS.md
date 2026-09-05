@@ -31,6 +31,8 @@
 - Electron：后续桌面 UI
 - SQLite：后续任务、账号、平台状态持久化
 
+完整开发方案见 `docs/IMPLEMENTATION_PLAN.md`。
+
 ## 三、模块规划
 
 ```text
@@ -94,7 +96,7 @@ src/
 
 - [ ] Excel 导入
 - [ ] 每条任务独立状态
-- [ ] 发布间隔
+- [ ] 发布节流
 - [ ] 失败重试
 - [ ] 暂停/继续
 - [ ] 导出结果
@@ -132,6 +134,8 @@ src/
 - [x] 明确微博必须作为前置发布平台
 - [x] 明确后续平台只使用微博分享/详情链接，不直接依赖原始网盘链接
 - [x] 建立 README 和项目进度文档
+- [x] 新增完整实现方案 `docs/IMPLEMENTATION_PLAN.md`
+- [x] 完整方案已覆盖微博链接三层获取、统一平台适配器、SQLite、多账号、队列恢复、错误分类、Electron UI、Excel 批量、日志、Selector 配置、测试与阶段验收标准
 - [x] 新增 `.profiles/<platform>` 独立登录态目录
 - [x] 新增微博登录 CLI：`npm run login:weibo`
 - [x] 新增微博页面基础登录状态检测
@@ -140,4 +144,3 @@ src/
 
 - 不修改 `ximishan/autoPushWeibo`
 - 不把旧微博导出项目直接改造成多平台发布器
-
