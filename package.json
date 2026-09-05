@@ -1,0 +1,13 @@
+{
+  "name": "auto-send-manhua",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "微博前置的多平台漫画/资源图文分发工具",
+  "scripts": {
+    "login:weibo": "node src/cli/login-weibo.js"
+  },
+  "dependencies": {
+    "playwright": "^1.53.2"
+  }
+}
