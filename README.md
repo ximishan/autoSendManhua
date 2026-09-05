@@ -49,8 +49,11 @@
 - [ ] 多账号管理
 - [ ] Excel 批量导入
 - [ ] 任务队列
-- [ ] 随机发布间隔
+- [ ] 发布节流
 - [ ] 失败重试
 - [ ] 发布日志
 
-详细进度见 `docs/PROJECT_STATUS.md`。
+## 项目文档
+
+- `docs/IMPLEMENTATION_PLAN.md`：完整实现方案，包含微博发布、链接获取、平台适配器、SQLite、多账号、任务队列、Electron UI、Excel 批量、日志、重试和验收标准。
+- `docs/PROJECT_STATUS.md`：当前开发进度、已完成和未完成功能。
