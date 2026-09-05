@@ -43,6 +43,7 @@ src/
 │  └─ profile-manager.js       # 平台登录态/Profile 管理
 ├─ platforms/
 │  ├─ weibo/
+│  │  ├─ session.js            # 微博会话与登录检测
 │  │  ├─ publisher.js          # 微博发布
 │  │  └─ resolve-post.js       # 获取刚发布微博链接
 │  ├─ zhihu/
@@ -50,16 +51,16 @@ src/
 │  ├─ baijiahao/
 │  └─ toutiao/
 └─ cli/
-   └─ index.js                 # 第一阶段先用 CLI 验证流程
+   └─ login-weibo.js           # 微博登录初始化
 ```
 
 ## 四、任务状态
 
 ### P0：微博最小闭环
 
-- [ ] 浏览器/Profile 管理
-- [ ] 登录微博
-- [ ] 判断微博是否登录
+- [x] 浏览器/Profile 管理
+- [x] 登录微博入口
+- [x] 基础登录状态检测
 - [ ] 发布纯文字微博
 - [ ] 发布文字 + 图片
 - [ ] 正文加入资源链接
@@ -131,6 +132,9 @@ src/
 - [x] 明确微博必须作为前置发布平台
 - [x] 明确后续平台只使用微博分享/详情链接，不直接依赖原始网盘链接
 - [x] 建立 README 和项目进度文档
+- [x] 新增 `.profiles/<platform>` 独立登录态目录
+- [x] 新增微博登录 CLI：`npm run login:weibo`
+- [x] 新增微博页面基础登录状态检测
 
 ## 七、明确不做
 
