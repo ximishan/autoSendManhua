@@ -1,29 +1,77 @@
 # autoSendManhua
 
-本地 Electron 多平台图文分发工具。任务先发布到微博并取得帖子链接，再把该链接写入知乎、简书、百家号、今日头条、搜狐号和网易号的平台模板。
+本地 Electron 多平台图文分发工具。任务先发布到微博并取得帖子链接，再把该微博链接写入知乎、简书、百家号、今日头条、搜狐号和网易号的平台模板。
 
-## 当前状态：原型，尚未完成验收
+## 当前状态
 
-2026-09-06 复核发现暂停、重试防重复发布、队列节流、发布结果确认和模板预览存在实际缺陷。上一版“已完成”的表述不准确。原有 16 项测试通过不能证明真实平台可用。
+微博扫码登录已经在 Windows 本机真实验证通过。微博发布实现已切换为复用 `ximishan/baidu-link-converter` 中用户已经验证过的接口流程，正在进行真实发布验收。其他平台仍属于原型 / 待真实验收状态。
 
-新增定向审计 28 个场景中有 27 个违反要求，详见 `docs/COMPLETION_AUDIT.md` 和 `docs/PROJECT_STATUS.md`。下列为已有代码模块，不代表功能均已验收通过。
+完整进度见：
 
-## 已有模块（含未完成项）
+- `docs/PROJECT_STATUS.md`
+- `docs/FEATURE_CHECKLIST.md`
+- `docs/IMPLEMENTATION_PLAN.md`
+
+## 微博实现基线（重要）
+
+微博账号登录和微博发布都以 `ximishan/baidu-link-converter` 的已验证实现为基线，不再自行发明另一套主流程。
+
+### 登录
+
+```text
+扫码登录微博
+→ 独立真实 Chrome Persistent Profile
+→ 手机确认
+→ 自动读取微博 Cookie
+→ 校验 SUB + XSRF-TOKEN
+→ 本机保存发布凭据
+```
+
+客户不需要命令行、不需要复制 Cookie、不需要再手动检测登录状态。
+
+### 发布
+
+```text
+选择图片（可选）
+→ picupload.weibo.com/interface/pic_upload.php 上传图片
+→ weibo.com/ajax/statuses/update 发布正文
+→ 直接读取接口返回的微博 ID
+→ resourceUrl 存在时，用 weibo.com/ajax/comments/create 发布首评
+→ 记录微博 ID / mid / bid / UID / URL / 发布时间 / 接口响应 / 首评状态
+```
+
+核心接口：
+
+```text
+图片：https://picupload.weibo.com/interface/pic_upload.php
+正文：https://weibo.com/ajax/statuses/update
+首评：https://weibo.com/ajax/comments/create
+```
+
+关键安全规则与 `baidu-link-converter` 保持一致：
+
+> 正文一旦已经取得微博 ID，即视为正文已发布。后续首评、记录或其他步骤失败，都不能再次发送正文。
+
+微博默认正文模板为 `{content}`。资源链接 `resourceUrl` 不再默认重复写进正文，而是按已验证流程发到首评。
+
+旧的 Playwright 微博 DOM 发布 / URL 猜测代码可以作为诊断参考，但不再作为微博主发布链路。
+
+## 已有模块
 
 - Electron 桌面端：任务中心、新建发布、Excel 批量、账号、模板、日志和设置。
-- SQLite 本地数据库：任务、图片、账号、平台 job、微博结果、模板、设置和日志。
-- Playwright Persistent Profile 管理代码（账号标识碰撞和串号缺陷待修复）。
-- 微博文字、多图、资源链接、响应解析、DOM 对比和 URL 存储原型（结果识别未验收）。
-- 微博前置与下游任务编排（部分简单用例通过，假成功和重复提交缺陷待修复）。
-- 暂停/继续、重试、恢复及队列入口（执行语义与节流未达要求）。
-- Excel `.xlsx` 导入逐行校验、错误行报告、导入模板和结果导出。
-- 平台 selector 独立维护，不需要修改核心工作流。
+- SQLite：任务、图片、账号、平台 job、微博结果、模板、设置和日志。
+- 微博一键扫码登录与本机 Cookie 持久化。
+- 微博接口发布：文字、多图、首评、微博 ID 与结果记录。
+- 微博结果完整记录：账号 ID、UID、微博 ID、mid、bid、canonical URL、share URL、发布时间、resolution、evidence、raw response。
+- 微博前置与下游任务编排。
+- 知乎 / 简书 / 百家号 / 今日头条 / 搜狐 / 网易平台适配原型。
+- Excel `.xlsx` 导入、校验、模板和结果导出。
 
 ## 环境
 
 - Windows 10/11
 - Node.js 22+
-- 系统 Chrome（优先）或 Playwright Chromium
+- Chrome
 
 安装：
 
@@ -32,92 +80,38 @@ cd D:\project\autoSendManhua
 npm install
 ```
 
-如果 Electron 二进制下载不稳定，可以只对当前命令指定镜像：
-
-```powershell
-$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
-npm install
-```
-
-## 本地验证
-
-```powershell
-npm test
-npm run smoke
-npm run smoke:ui
-```
-
-- `npm test`：状态机、SQLite、模板、微博结果解析、Excel 及 Electron 启动测试。
-- `npm run smoke`：不访问真实平台、不发布内容的微博→下游模拟闭环。
-- `npm run smoke:ui`：启动 Electron，检查预加载 API、导航和任务表后自动退出；不覆盖发布、暂停和预览正确性。测试应设置独立的 `AUTO_SEND_MANHUA_ROOT`，避免启动恢复逻辑影响业务数据。
-
-额外的完成度审计：`node scripts/audit-core.mjs` 和 `node scripts/audit-ui.mjs`，当前均会返回退出码 1（仍有不满足项）。
-
-## 启动桌面端
+启动：
 
 ```powershell
 npm start
 ```
 
-首次使用顺序：
-
-1. 在“账号管理”添加微博及目标平台账号。
-2. 点击“登录/打开”，在正常浏览器窗口完成登录。
-3. 点击“测试状态”。
-4. 在“平台模板”确认各平台正文。
-5. 在“新建发布”填写任务并选择账号。
-
-验证码、二维码或平台人工验证不会被绕过；对应任务会进入“需处理/已暂停”。
-
-## CLI
-
-登录指定平台和账号：
+测试：
 
 ```powershell
-npm run login -- weibo wb_01
-npm run login -- zhihu zh_01
+npm test
+node scripts/audit-core.mjs
+node scripts/audit-ui.mjs
 ```
 
-运行数据库中已有任务，或从 JSON 创建并运行：
+## 当前真实验收顺序
 
-```powershell
-npm run run:task -- task_xxx
-npm run run:task -- D:\tasks\one-task.json
-```
-
-导入 Excel：
-
-```powershell
-npm run import:excel -- D:\tasks\batch.xlsx
-```
-
-任务 JSON 示例：
-
-```json
-{
-  "title": "标题",
-  "content": "正文",
-  "resourceUrl": "https://pan.example.com/xxx",
-  "images": ["D:/images/1.jpg", "D:/images/2.jpg"],
-  "selectedPlatforms": ["zhihu", "jianshu"],
-  "accountIds": {
-    "weibo": "wb_01",
-    "zhihu": "zh_01",
-    "jianshu": "js_01"
-  }
-}
-```
+1. 微博扫码登录（已通过）。
+2. 纯文字微博接口发布 + 微博 ID / URL 记录。
+3. 多图微博接口发布。
+4. resourceUrl 自动发布首评，首评失败时确认正文绝不重发。
+5. 程序重启后登录态复用。
+6. 跑通真实“微博 → 知乎”。
 
 ## 数据目录
 
 ```text
-data/app.db       SQLite 数据库
-.profiles/        各平台/账号登录 Profile
-logs/             脱敏 JSONL 调试日志
-imports/          导入模板
-exports/          发布结果
+data/app.db                 SQLite 数据库
+.profiles/                  各平台 / 账号登录 Profile
+data/weibo_credentials.json 微博发布凭据（仅本机）
+logs/                       调试日志
+imports/                    导入模板
+exports/                    发布结果
 ```
 
-日志目前仅对 details 对象中的 Cookie、Token、Authorization 和密码键进行脱敏；message/stack 字符串不保证脱敏。Profile 保存在本机。
-
-完整规格见 `docs/IMPLEMENTATION_PLAN.md`，当前证据与验收边界见 `docs/PROJECT_STATUS.md`。
+微博 Cookie / Token 不提交到 GitHub。
