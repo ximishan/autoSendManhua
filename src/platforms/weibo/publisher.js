@@ -1,7 +1,19 @@
 import { PlatformPublisher } from "../base-publisher.js";
 import { LoginRequiredError } from "../../core/errors.js";
+import { extractResourceLinks } from "../../core/task.js";
 import { validateWeiboCookie } from "./shortcut-auth.js";
 import { WeiboApiClient, WEIBO_COMMENT_URL, WEIBO_POST_URL, WEIBO_UPLOAD_URL } from "./api-client.js";
+
+export function buildWeiboResourceComment(resourceText) {
+  const text = String(resourceText || "").trim();
+  if (!text) return "";
+  const links = extractResourceLinks(text);
+  if (!links.length) return "";
+  // 单个纯 URL 延续 baidu-link-converter 的“链接：URL”格式；
+  // 多链接或带 K:/D:/百度:/夸克: 等说明时，原样保留用户输入。
+  if (links.length === 1 && text === links[0]) return `链接：${text}`;
+  return text;
+}
 
 export class WeiboPublisher extends PlatformPublisher {
   constructor(options = {}) {
@@ -62,7 +74,7 @@ export class WeiboPublisher extends PlatformPublisher {
     let commentStatus = "skipped";
     let commentError = "";
     let commentResponse = null;
-    const commentContent = task.resourceUrl ? `链接：${task.resourceUrl}` : "";
+    const commentContent = buildWeiboResourceComment(task.resourceUrl);
     if (commentContent) {
       try {
         commentResponse = await client.publishComment(info.id, commentContent);
@@ -95,6 +107,7 @@ export class WeiboPublisher extends PlatformPublisher {
         uploadEndpoint: WEIBO_UPLOAD_URL,
         commentEndpoint: WEIBO_COMMENT_URL,
         imageIds,
+        resourceLinks: extractResourceLinks(task.resourceUrl),
         commentStatus,
         commentError
       },
@@ -102,6 +115,8 @@ export class WeiboPublisher extends PlatformPublisher {
         postResponse,
         commentResponse,
         imageIds,
+        resourceText: task.resourceUrl || "",
+        resourceLinks: extractResourceLinks(task.resourceUrl),
         commentStatus,
         commentError
       }
