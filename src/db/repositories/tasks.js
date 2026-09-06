@@ -11,7 +11,12 @@ function hydrateTask(row, database) {
   const images = database.prepare("SELECT file_path FROM task_images WHERE task_id = ? ORDER BY sort_order, id")
     .all(row.id).map((item) => item.file_path);
   const jobs = database.prepare("SELECT * FROM publish_jobs WHERE task_id = ? ORDER BY id").all(row.id);
-  const weibo = database.prepare("SELECT * FROM weibo_results WHERE task_id = ?").get(row.id) || null;
+  const weiboRow = database.prepare("SELECT * FROM weibo_results WHERE task_id = ?").get(row.id) || null;
+  const weibo = weiboRow ? {
+    ...weiboRow,
+    raw: parseJson(weiboRow.raw_json, {}),
+    evidence: parseJson(weiboRow.evidence_json, {})
+  } : null;
   return {
     id: row.id,
     title: row.title,
@@ -108,18 +113,34 @@ export class TaskRepository {
       .run(new Date().toISOString(), taskId);
   }
 
-  saveWeiboResult(taskId, result) {
+  saveWeiboResult(taskId, result, accountId = "") {
     const now = new Date().toISOString();
+    const raw = result.raw && typeof result.raw === 'object' ? result.raw : {
+      id: result.id || result.weiboId || "",
+      mid: result.mid || "",
+      bid: result.bid || "",
+      userId: result.userId || "",
+      canonicalUrl: result.canonicalUrl || "",
+      shareUrl: result.shareUrl || "",
+      publishedAt: result.publishedAt || now,
+      resolution: result.resolution || "",
+      resultStatus: result.resultStatus || "published"
+    };
     this.database.prepare(`
-      INSERT INTO weibo_results(task_id, weibo_id, mid, bid, user_id, canonical_url, share_url, published_at, raw_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO weibo_results(
+        task_id, weibo_id, mid, bid, user_id, canonical_url, share_url, published_at,
+        raw_json, updated_at, account_id, resolution, evidence_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(task_id) DO UPDATE SET
         weibo_id = excluded.weibo_id, mid = excluded.mid, bid = excluded.bid, user_id = excluded.user_id,
         canonical_url = excluded.canonical_url, share_url = excluded.share_url,
-        published_at = excluded.published_at, raw_json = excluded.raw_json, updated_at = excluded.updated_at
+        published_at = excluded.published_at, raw_json = excluded.raw_json, updated_at = excluded.updated_at,
+        account_id = excluded.account_id, resolution = excluded.resolution, evidence_json = excluded.evidence_json
     `).run(
       taskId, result.id || result.weiboId || "", result.mid || "", result.bid || "", result.userId || "",
-      result.canonicalUrl || "", result.shareUrl || "", result.publishedAt || now, JSON.stringify(result.raw || {}), now
+      result.canonicalUrl || "", result.shareUrl || "", result.publishedAt || now, JSON.stringify(raw), now,
+      accountId || "", result.resolution || "", JSON.stringify(result.evidence || {})
     );
     return this.get(taskId).weibo;
   }
@@ -160,7 +181,10 @@ export class TaskRepository {
         post_id:String(validated.id || validated.postId || ''),post_url:validated.canonicalUrl || validated.postUrl || '',
         result_status:validated.resultStatus,finished_at:validated.publishedAt || new Date().toISOString(),
         error_code:'',error_message:'',evidence:JSON.stringify(validated.evidence || {})});
-      if(job.platform==='weibo') { this.saveWeiboResult(job.task_id,validated);this.unlockDownstream(job.task_id); }
+      if(job.platform==='weibo') {
+        this.saveWeiboResult(job.task_id,validated,job.account_id || '');
+        this.unlockDownstream(job.task_id);
+      }
       this.database.exec('COMMIT');
     } catch(e) {this.database.exec('ROLLBACK');throw e;}
     return validated;
