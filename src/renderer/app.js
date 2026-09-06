@@ -187,11 +187,33 @@ function input() {
   };
 }
 
+function renderWeiboResult(task) {
+  const result = task.weibo;
+  if (!result) return "";
+  const rows = [
+    ["发布账号", result.account_id],
+    ["微博 UID", result.user_id],
+    ["微博 ID", result.weibo_id],
+    ["mid", result.mid],
+    ["bid", result.bid],
+    ["发布时间", result.published_at],
+    ["识别方式", result.resolution]
+  ].filter(([, value]) => value);
+  const evidence = result.evidence && Object.keys(result.evidence).length ? JSON.stringify(result.evidence) : "";
+  return `<article class="job-detail weibo-result-detail">
+    <h3>微博发布结果记录</h3>
+    ${rows.map(([label, value]) => `<p><b>${esc(label)}：</b>${esc(value)}</p>`).join("")}
+    ${result.canonical_url ? `<p><b>详情链接：</b><button class="link-btn" data-open="${esc(result.canonical_url)}">${esc(result.canonical_url)}</button></p>` : ""}
+    ${result.share_url ? `<p><b>分享链接：</b><button class="link-btn" data-open="${esc(result.share_url)}">${esc(result.share_url)}</button></p>` : ""}
+    ${evidence ? `<p><b>提交证据：</b>${esc(evidence)}</p>` : ""}
+  </article>`;
+}
+
 async function detail(id) {
   detailId = id;
   const task = await api.getTask(id);
   if (!task) return;
-  $("#detail-content").innerHTML = `<h2>${esc(task.title)}</h2><p>${status(task.status)}</p>` + task.jobs.map(job => {
+  $("#detail-content").innerHTML = `<h2>${esc(task.title)}</h2><p>${status(task.status)}</p>${renderWeiboResult(task)}` + task.jobs.map(job => {
     const uncertain = ["needs_action", "submitted", "interrupted"].includes(job.status) && job.phase !== "prepare";
     return `<article class="job-detail"><h3>${names[job.platform]} ${status(job.status)}</h3><p>阶段：${esc(job.phase)} · 累计尝试 ${job.attempt_count} 次</p><p>${esc(job.error_message || "无错误")}</p>${job.post_url ? `<button class="link-btn" data-open="${esc(job.post_url)}">${esc(job.post_url)}</button>` : ""}${uncertain ? `<label>已核实的帖子详情地址<input id="result-${job.id}" type="url" placeholder="https://..."></label><label><input type="checkbox" id="confirm-${job.id}">我已打开帖子，确认内容和发布账号与本任务一致</label><button class="primary small" data-reconcile="${job.id}">保存人工核对结果</button><button class="secondary small" data-not-published="${job.id}">确认未发布，重新准备</button>` : ""}</article>`;
   }).join("") + `<button class="secondary" data-cancel="${task.id}">取消未提交部分</button>`;
