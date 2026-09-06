@@ -14,14 +14,14 @@ import { getDataPaths } from "../config/paths.js";
 import { renderTemplate } from "../core/template-engine.js";
 import { validPostUrl } from "../core/result.js";
 import {
-  findWeiboShortcutAccount,
   getWeiboCredential,
-  hasWeiboCredential,
-  listWeiboShortcutAccounts,
-  openWeiboShortcut,
   removeWeiboCredential,
   saveWeiboCredential
 } from "../platforms/weibo/shortcut-auth.js";
+import {
+  openWeiboQrLogin,
+  waitForWeiboLogin
+} from "../platforms/weibo/session.js";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow;
@@ -70,33 +70,85 @@ function publisherFor(platform, options = {}) {
   });
 }
 
-function syncWeiboShortcutAccounts(directory) {
-  const shortcuts = listWeiboShortcutAccounts(directory);
-  for (const shortcut of shortcuts) {
-    const existing = database.accounts.get(shortcut.id);
-    database.accounts.upsert({
-      id: shortcut.id,
+async function loginWeiboByQr(accountId = null) {
+  const id = accountId || `weibo_${Date.now().toString(36)}`;
+  let account = database.accounts.get(id);
+  if (account && account.platform !== "weibo") throw new Error("该账号 ID 不属于微博");
+  if (database.raw.prepare("SELECT 1 FROM publish_jobs WHERE account_id=? AND status='running'").get(id)) {
+    throw new Error("账号正在执行任务，请等待结束");
+  }
+
+  if (!account) {
+    account = database.accounts.upsert({
+      id,
       platform: "weibo",
-      nickname: shortcut.name,
-      profilePath: existing?.profile_path || resolveProfileDir("weibo", shortcut.id),
-      status: shortcut.configured ? "logged_in" : "needs_login",
-      lastLoginAt: existing?.last_login_at || null,
-      lastCheckedAt: new Date().toISOString(),
-      enabled: existing ? Boolean(existing.enabled) : true
+      nickname: "微博账号",
+      profilePath: resolveProfileDir("weibo", id),
+      status: "unknown",
+      enabled: true
     });
   }
-  return shortcuts.map(shortcut => ({
-    ...shortcut,
-    account: database.accounts.get(shortcut.id)
-  }));
-}
 
-function getConfiguredShortcut(accountId) {
-  const directory = database.settings.get("weibo.shortcutsDir", "");
-  if (!directory) throw new Error("请先选择微博账号快捷方式目录");
-  const shortcut = findWeiboShortcutAccount(directory, accountId);
-  if (!shortcut) throw new Error("未找到该微博账号快捷方式，请重新导入账号目录");
-  return shortcut;
+  const session = await browserManager.getSession("weibo", id, {
+    profileDir: account.profile_path
+  });
+  mainWindow?.webContents.send("account:login-progress", {
+    accountId: id,
+    platform: "weibo",
+    status: "opening_qr"
+  });
+
+  try {
+    const opened = await openWeiboQrLogin(session.page);
+    let identity = opened.identity;
+    if (!identity?.authenticated || !identity?.hasXsrf || !identity?.cookieText) {
+      mainWindow?.webContents.send("account:login-progress", {
+        accountId: id,
+        platform: "weibo",
+        status: "waiting_scan"
+      });
+      identity = await waitForWeiboLogin(session.page, { timeoutMs: 300000 });
+    }
+
+    if (!identity?.authenticated || !identity?.cookieText) {
+      database.accounts.setStatus(id, "needs_login");
+      throw new Error("扫码登录超时或登录窗口已关闭，请重新点击“扫码登录微博”");
+    }
+
+    // 与 baidu-link-converter 相同，以 SUB + XSRF-TOKEN 作为微博登录凭据；
+    // 区别是这里直接从扫码成功后的浏览器 Profile 自动读取，客户无需手动复制 Cookie。
+    saveWeiboCredential(id, identity.cookieText);
+
+    account = database.accounts.upsert({
+      id,
+      platform: "weibo",
+      nickname: identity.uid ? `微博 ${identity.uid}` : (account.nickname || "微博账号"),
+      profilePath: account.profile_path,
+      status: "logged_in",
+      lastLoginAt: new Date().toISOString(),
+      lastCheckedAt: new Date().toISOString(),
+      enabled: true
+    });
+    const updated = database.accounts.setStatus(id, "logged_in");
+    mainWindow?.webContents.send("account:login-progress", {
+      accountId: id,
+      platform: "weibo",
+      status: "logged_in",
+      uid: identity.uid || ""
+    });
+
+    await session.page.waitForTimeout(600).catch(() => {});
+    await browserManager.close("weibo", id).catch(() => {});
+    return { ...updated, uid: identity.uid || "" };
+  } catch (error) {
+    mainWindow?.webContents.send("account:login-progress", {
+      accountId: id,
+      platform: "weibo",
+      status: "failed",
+      message: error.message
+    });
+    throw error;
+  }
 }
 
 function setupIpc() {
@@ -110,8 +162,7 @@ function setupIpc() {
       maxAttempts: database.settings.get("retry.maxAttempts", 2),
       intervalMs: database.settings.get("queue.intervalMs", 1500),
       retentionDays: database.settings.get("logs.retentionDays", 30),
-      preferShareUrl: database.settings.get("weibo.preferShareUrl", true),
-      weiboShortcutsDir: database.settings.get("weibo.shortcutsDir", "")
+      preferShareUrl: database.settings.get("weibo.preferShareUrl", true)
     }
   }));
 
@@ -167,42 +218,13 @@ function setupIpc() {
     ...account,
     profilePath: database.accounts.get(account.id)?.profile_path || resolveProfileDir(account.platform, account.id)
   }));
-
-  // 微博登录逻辑直接复用 baidu-link-converter：Chrome 快捷方式 + Cookie。
-  ipcMain.handle("account:weibo-import-shortcuts", async () => {
-    const picked = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] });
-    if (picked.canceled || !picked.filePaths[0]) return null;
-    const directory = picked.filePaths[0];
-    const shortcuts = listWeiboShortcutAccounts(directory);
-    if (!shortcuts.length) throw new Error("该目录没有找到 .lnk 格式的微博账号快捷方式");
-    database.settings.set("weibo.shortcutsDir", directory);
-    const accounts = syncWeiboShortcutAccounts(directory);
-    return { directory, accounts, count: accounts.length };
-  });
-
-  ipcMain.handle("account:weibo-open-shortcut", async (_, accountId) => {
-    const shortcut = getConfiguredShortcut(accountId);
-    await openWeiboShortcut(shortcut.shortcutPath);
-    return { opened: true, name: shortcut.name };
-  });
-
-  ipcMain.handle("account:weibo-save-cookie", (_, accountId, cookieText) => {
-    const account = database.accounts.get(accountId);
-    if (!account || account.platform !== "weibo") throw new Error("微博账号不存在");
-    getConfiguredShortcut(accountId);
-    saveWeiboCredential(accountId, cookieText);
-    return database.accounts.setStatus(accountId, "logged_in");
-  });
+  ipcMain.handle("account:weibo-qr-login", (_, accountId) => loginWeiboByQr(accountId || null));
 
   ipcMain.handle("account:check", async (_, accountId) => {
     const account = database.accounts.get(accountId);
     if (!account) throw new Error("账号不存在");
     if (database.raw.prepare("SELECT 1 FROM publish_jobs WHERE account_id=? AND status='running'").get(accountId)) {
       throw new Error("账号正在执行任务，请等待结束");
-    }
-    if (account.platform === "weibo") {
-      const configured = hasWeiboCredential(accountId);
-      return database.accounts.setStatus(accountId, configured ? "logged_in" : "needs_login");
     }
     const publisher = publisherFor(account.platform, { account, logger });
     const loggedIn = await publisher.checkLogin();
@@ -214,11 +236,6 @@ function setupIpc() {
     if (!account) throw new Error("账号不存在");
     if (database.raw.prepare("SELECT 1 FROM publish_jobs WHERE account_id=? AND status='running'").get(accountId)) {
       throw new Error("账号正在执行任务，请等待结束");
-    }
-    if (account.platform === "weibo") {
-      const shortcut = getConfiguredShortcut(accountId);
-      await openWeiboShortcut(shortcut.shortcutPath);
-      return { opened: true, name: shortcut.name };
     }
     const publisher = publisherFor(account.platform, { account, logger });
     await publisher.checkLogin();
@@ -299,10 +316,6 @@ app.whenReady().then(() => {
     onEntry: entry => mainWindow?.webContents.send("log:entry", entry)
   });
   logger.prune(database.settings.get("logs.retentionDays", 30));
-  const savedWeiboDir = database.settings.get("weibo.shortcutsDir", "");
-  if (savedWeiboDir) {
-    try { syncWeiboShortcutAccounts(savedWeiboDir); } catch {}
-  }
   workflow = new Workflow({
     database,
     logger,
