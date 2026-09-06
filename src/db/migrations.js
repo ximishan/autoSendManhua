@@ -116,6 +116,12 @@ export const migrations = [
     sql: `ALTER TABLE weibo_results ADD COLUMN account_id TEXT NOT NULL DEFAULT '';
       ALTER TABLE weibo_results ADD COLUMN resolution TEXT NOT NULL DEFAULT '';
       ALTER TABLE weibo_results ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}';`
+  },
+  {
+    version: 4,
+    sql: `UPDATE templates
+      SET content_template = '{content}'
+      WHERE platform = 'weibo' AND content_template = '{content}' || char(10) || char(10) || '{resourceUrl}';`
   }
 ];
 
