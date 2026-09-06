@@ -85,17 +85,6 @@ async function readUidFromMobile(page) {
   }
 }
 
-async function readUidFromDom(page) {
-  try {
-    const hrefs = await page.locator("a[href]").evaluateAll(nodes => nodes.slice(0, 300).map(node => node.href || node.getAttribute("href") || ""));
-    for (const href of hrefs) {
-      const match = String(href).match(/weibo\.com\/(?:u\/)?(\d{5,})/);
-      if (match) return match[1];
-    }
-  } catch {}
-  return "";
-}
-
 export async function openWeiboQrLogin(page) {
   await page.goto(WEIBO_HOME, {
     waitUntil: "domcontentloaded",
@@ -178,7 +167,6 @@ export async function readWeiboIdentity(page) {
 
   let uid = await readUidFromDesktop(page);
   if (!uid) uid = await readUidFromMobile(page);
-  if (!uid) uid = await readUidFromDom(page);
 
   return {
     uid,
