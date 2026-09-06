@@ -13,6 +13,7 @@ import { exportResults, importExcel, writeImportTemplate } from "../importers/ex
 import { getDataPaths } from "../config/paths.js";
 import { renderTemplate } from '../core/template-engine.js';
 import { validPostUrl } from '../core/result.js';
+import { openWeiboQrLogin, waitForWeiboLogin } from '../platforms/weibo/session.js';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow;
@@ -51,6 +52,60 @@ function ensureHttpUrl(value) {
   const url = new URL(value);
   if (!/^https?:$/.test(url.protocol)) throw new Error("只允许打开 HTTP/HTTPS 地址");
   return url.href;
+}
+
+async function loginWeiboByQr(accountId = null) {
+  const id = accountId || `weibo_${Date.now().toString(36)}`;
+  let account = database.accounts.get(id);
+  if (account && account.platform !== 'weibo') throw new Error('该账号 ID 不属于微博');
+  if (database.raw.prepare("SELECT 1 FROM publish_jobs WHERE account_id=? AND status='running'").get(id)) {
+    throw new Error('账号正在执行任务，请等待结束');
+  }
+
+  if (!account) {
+    account = database.accounts.upsert({
+      id,
+      platform: 'weibo',
+      nickname: '微博账号',
+      profilePath: resolveProfileDir('weibo', id),
+      status: 'unknown'
+    });
+  }
+
+  const session = await browserManager.getSession('weibo', id, { profileDir: account.profile_path });
+  mainWindow?.webContents.send('account:login-progress', { accountId: id, platform: 'weibo', status: 'opening_qr' });
+
+  try {
+    const opened = await openWeiboQrLogin(session.page);
+    let identity = opened.identity;
+    if (!identity) {
+      mainWindow?.webContents.send('account:login-progress', { accountId: id, platform: 'weibo', status: 'waiting_scan' });
+      identity = await waitForWeiboLogin(session.page, { timeoutMs: 300000 });
+    }
+
+    if (!identity?.uid) {
+      database.accounts.setStatus(id, 'needs_login');
+      throw new Error('扫码登录超时或登录窗口已关闭，请重新点击“扫码登录微博”');
+    }
+
+    account = database.accounts.upsert({
+      id,
+      platform: 'weibo',
+      nickname: account.nickname && account.nickname !== '微博账号' ? account.nickname : `微博 ${identity.uid}`,
+      profilePath: account.profile_path,
+      status: 'logged_in',
+      lastLoginAt: new Date().toISOString(),
+      lastCheckedAt: new Date().toISOString(),
+      enabled: Boolean(account.enabled)
+    });
+    const updated = database.accounts.setStatus(id, 'logged_in');
+    mainWindow?.webContents.send('account:login-progress', { accountId: id, platform: 'weibo', status: 'logged_in', uid: identity.uid });
+    await browserManager.close('weibo', id).catch(() => {});
+    return { ...updated, uid: identity.uid };
+  } catch (error) {
+    mainWindow?.webContents.send('account:login-progress', { accountId: id, platform: 'weibo', status: 'failed', message: error.message });
+    throw error;
+  }
 }
 
 function setupIpc() {
@@ -103,6 +158,7 @@ function setupIpc() {
     ...account,
     profilePath: database.accounts.get(account.id)?.profile_path || resolveProfileDir(account.platform, account.id)
   }));
+  ipcMain.handle('account:weibo-qr-login', (_, accountId) => loginWeiboByQr(accountId || null));
   ipcMain.handle("account:check", async (_, accountId) => {
     const account = database.accounts.get(accountId);
     if (!account) throw new Error("账号不存在");
@@ -115,6 +171,7 @@ function setupIpc() {
     const account = database.accounts.get(accountId);
     if (!account) throw new Error("账号不存在");
     if(database.raw.prepare("SELECT 1 FROM publish_jobs WHERE account_id=? AND status='running'").get(accountId))throw new Error('账号正在执行任务，请等待结束');
+    if (account.platform === 'weibo' && account.status !== 'logged_in') return loginWeiboByQr(accountId);
     const publisher = createPublisher(account.platform, { account, browserManager, logger });
     await publisher.checkLogin();
     return { opened: true };
