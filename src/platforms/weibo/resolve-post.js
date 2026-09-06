@@ -1,6 +1,7 @@
 import { textFingerprint } from "../helpers.js";
 
 const BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const WEIBO_HOSTS = new Set(["weibo.com", "www.weibo.com"]);
 
 function encodeBase62(number) {
   let value = BigInt(number);
@@ -27,88 +28,217 @@ export function midToBid(mid) {
 
 function pick(object, keys) {
   for (const key of keys) {
-    if(typeof object?.[key]==='number'&&!Number.isSafeInteger(object[key]))continue;
+    if (typeof object?.[key] === "number" && !Number.isSafeInteger(object[key])) continue;
     if (object?.[key] !== undefined && object?.[key] !== null && object?.[key] !== "") return String(object[key]);
   }
   return "";
 }
 
-export function extractWeiboIdentifiers(payload) {
+function isNumericId(value) {
+  return /^\d+$/.test(String(value || ""));
+}
+
+function normalizeShareUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    if (url.protocol !== "https:") return "";
+    if (WEIBO_HOSTS.has(url.hostname) || url.hostname === "t.cn") return url.toString();
+  } catch {}
+  return "";
+}
+
+export function extractWeiboIdentifiers(payload, expectedUserId = "") {
   const queue = [payload];
   const seen = new Set();
   let best = null;
+  const expected = String(expectedUserId || "");
+
   while (queue.length) {
     const value = queue.shift();
     if (!value || typeof value !== "object" || seen.has(value)) continue;
     seen.add(value);
-    const id = pick(value, ["idstr", "id", "weibo_id"]);
+
+    if (Array.isArray(value)) {
+      for (const item of value) if (item && typeof item === "object") queue.push(item);
+      continue;
+    }
+
+    const id = pick(value, ["idstr", "weibo_id", "id"]);
     const mid = pick(value, ["mid"]);
     const bid = pick(value, ["bid", "mblogid"]);
     const userId = pick(value.user, ["idstr", "id", "uid"]) || pick(value, ["user_id", "uid"]);
-    const shareUrl = pick(value, ["share_url", "shareUrl", "url"]);
-    const isPost=Boolean(userId && (bid || mid) && (id || mid));
-    const candidate = { id, mid, bid: bid || midToBid(mid), userId, shareUrl: /^https?:\/\//.test(shareUrl) ? shareUrl : "" };
-    const score = [candidate.id, candidate.mid, candidate.bid, candidate.userId].filter(Boolean).length;
-    if (isPost && (!best || score > best.score)) best = { ...candidate, score };
-    for (const child of Array.isArray(value) ? value : ['data','status','mblog'].map(key=>value[key])) {
+    const numericPostId = isNumericId(mid) ? mid : (isNumericId(id) ? id : "");
+    const resolvedBid = bid || midToBid(numericPostId);
+
+    if (isNumericId(userId) && numericPostId && resolvedBid && (!expected || userId === expected)) {
+      const candidate = {
+        id: isNumericId(id) ? id : numericPostId,
+        mid: isNumericId(mid) ? mid : numericPostId,
+        bid: resolvedBid,
+        userId,
+        shareUrl: normalizeShareUrl(pick(value, ["share_url", "shareUrl", "url"]))
+      };
+      const score = [candidate.id, candidate.mid, candidate.bid, candidate.userId, candidate.shareUrl].filter(Boolean).length;
+      if (!best || score > best.score) best = { ...candidate, score };
+    }
+
+    for (const key of ["data", "status", "mblog", "statuses", "items", "cards", "card_group"]) {
+      const child = value[key];
       if (child && typeof child === "object") queue.push(child);
     }
   }
+
   if (!best) return null;
   delete best.score;
   return best;
 }
 
 export function buildWeiboUrls({ userId, bid, id, mid, shareUrl }) {
-  const resolvedBid = bid || midToBid(mid);
-  const canonicalUrl = userId && resolvedBid
+  const resolvedBid = bid || midToBid(mid || id);
+  const canonicalUrl = isNumericId(userId) && resolvedBid
     ? `https://weibo.com/${userId}/${resolvedBid}`
-    : id ? `https://weibo.com/detail/${id}` : "";
-  return { canonicalUrl, shareUrl: shareUrl || "" };
+    : isNumericId(id) ? `https://weibo.com/detail/${id}` : "";
+  return { canonicalUrl, shareUrl: normalizeShareUrl(shareUrl) };
+}
+
+function postKey(post) {
+  if (post?.mid) return `mid:${post.mid}`;
+  if (post?.id) return `id:${post.id}`;
+  if (post?.userId && post?.bid) return `bid:${post.userId}:${post.bid}`;
+  if (post?.url) return `url:${String(post.url).split("?")[0]}`;
+  return "";
+}
+
+function comparableText(value) {
+  return String(value || "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/https?:\/\/[^\s]+/gi, "")
+    .replace(/网页链接/g, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/&nbsp;|&amp;|&lt;|&gt;|&#39;|&quot;/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+export async function captureRecentPostsViaApi(page, uid, limit = 8) {
+  const userId = String(uid || "");
+  if (!isNumericId(userId)) return [];
+  const context = page.context?.();
+  if (!context?.newPage) return [];
+
+  const probe = await context.newPage();
+  try {
+    await probe.goto(`https://m.weibo.cn/u/${userId}`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    const posts = await probe.evaluate(async ({ uid, limit }) => {
+      const response = await fetch(`/api/container/getIndex?type=uid&value=${uid}&containerid=107603${uid}&page=1`, {
+        credentials: "include",
+        headers: { accept: "application/json, text/plain, */*", "x-requested-with": "XMLHttpRequest" }
+      });
+      if (!response.ok) return [];
+      const payload = await response.json();
+      const rows = [];
+      const walk = (cards) => {
+        for (const card of Array.isArray(cards) ? cards : []) {
+          if (card?.mblog) rows.push(card.mblog);
+          if (Array.isArray(card?.card_group)) walk(card.card_group);
+        }
+      };
+      walk(payload?.data?.cards);
+      const toText = (html) => {
+        const node = document.createElement("div");
+        node.innerHTML = String(html || "");
+        return (node.innerText || node.textContent || "").trim();
+      };
+      return rows.slice(0, limit).map((mblog) => ({
+        id: String(mblog.idstr || mblog.id || ""),
+        mid: String(mblog.mid || mblog.idstr || mblog.id || ""),
+        bid: String(mblog.bid || mblog.mblogid || ""),
+        userId: String(mblog.user?.idstr || mblog.user?.id || ""),
+        text: toText(mblog.longText?.longTextContent || mblog.text || ""),
+        publishedAt: String(mblog.created_at || ""),
+        imageCount: Number(mblog.pic_num ?? mblog.pics?.length ?? 0)
+      }));
+    }, { uid: userId, limit });
+
+    return posts.map((post) => {
+      const urls = buildWeiboUrls(post);
+      const timestamp = Date.parse(post.publishedAt);
+      return {
+        ...post,
+        url: urls.canonicalUrl,
+        publishedAt: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : post.publishedAt,
+        source: "profile-api"
+      };
+    }).filter((post) => post.url && post.userId === userId);
+  } catch {
+    return [];
+  } finally {
+    await probe.close().catch(() => {});
+  }
 }
 
 export async function captureRecentPosts(page, selectors) {
   const cardSelector = selectors.postCards.join(",");
   return page.locator(cardSelector).evaluateAll((cards) => cards.slice(0, 8).map((card) => {
     const link = [...card.querySelectorAll("a[href]")].map((node) => node.href)
-      .find((href) => /weibo\.com\/(?:\d+\/\w+|detail\/\d+)/.test(href)) || "";
-    const match = link.match(/weibo\.com\/(?:detail\/)?(?:\d+\/)?([A-Za-z0-9]+)/);
+      .find((href) => /weibo\.com\/(?:\d+\/[A-Za-z0-9]+|detail\/\d+)/.test(href)) || "";
+    const desktop = link.match(/weibo\.com\/(\d+)\/([A-Za-z0-9]+)/);
+    const detail = link.match(/weibo\.com\/detail\/(\d+)/);
+    const attrMid = card.getAttribute("mid") || card.getAttribute("data-mid") || "";
+    const timeNode = card.querySelector('time[datetime], a[title][href*="/"]');
     return {
-      id: card.getAttribute("mid") || card.getAttribute("data-mid") || match?.[1] || "",
-      url: link,
-      text: (card.querySelector('[data-testid="post-content"], [class*="detail_wbtext"], [class*="wbtext"], p')?.innerText || '').trim(),
-      userId: new URL(link || 'https://weibo.com/').pathname.split('/')[1],
-      publishedAt: card.querySelector('time[datetime]')?.getAttribute('datetime') || card.getAttribute('data-published-at') || '',
-      imageCount: card.querySelectorAll('[data-testid="post-image"], [class*="picture"] img').length
+      id: detail?.[1] || (/^\d+$/.test(attrMid) ? attrMid : ""),
+      mid: /^\d+$/.test(attrMid) ? attrMid : "",
+      bid: desktop?.[2] || "",
+      url: link.split("?")[0],
+      text: (card.querySelector('[data-testid="post-content"], [class*="detail_wbtext"], [class*="wbtext"], [class*="text"]')?.innerText || "").trim(),
+      userId: desktop?.[1] || "",
+      publishedAt: timeNode?.getAttribute("datetime") || timeNode?.getAttribute("title") || card.getAttribute("data-published-at") || "",
+      imageCount: card.querySelectorAll('[data-testid="post-image"], [class*="picture"] img').length,
+      source: "profile-dom"
     };
   })).catch(() => []);
 }
 
 export function matchNewPost(beforePosts, afterPosts, task, publishedAt = Date.now()) {
-  const beforeIds = new Set(beforePosts.map((post) => post.id || post.url).filter(Boolean));
-  const fingerprint = textFingerprint(task.content);
-  const candidates = afterPosts.filter((post) => !beforeIds.has(post.id || post.url));
-  const uid=String(task.userId || task.weiboUserId || '');
-  if(!uid || !Number.isFinite(publishedAt))return null;
-  const matched=candidates.filter(post=>{
-    const time=Date.parse(post.publishedAt);
-    return String(post.userId)===uid && Number.isFinite(time) && time>=publishedAt-60000 && time<=Date.now()+60000
-      && post.imageCount===(task.images?.length||0) && fingerprint && textFingerprint(post.text,fingerprint.length)===fingerprint;
+  const beforeKeys = new Set(beforePosts.map(postKey).filter(Boolean));
+  const uid = String(task.userId || task.weiboUserId || "");
+  const clickedAt = Number(publishedAt);
+  if (!isNumericId(uid) || !Number.isFinite(clickedAt)) return null;
+
+  const expectedText = comparableText(task.content);
+  const expectedImages = task.images?.length || 0;
+  const candidates = afterPosts.filter((post) => {
+    const key = postKey(post);
+    if (!key || beforeKeys.has(key)) return false;
+    if (String(post.userId || "") !== uid) return false;
+    if (Number(post.imageCount ?? -1) !== expectedImages) return false;
+    const time = Date.parse(post.publishedAt);
+    if (!Number.isFinite(time) || time < clickedAt - 90000 || time > Date.now() + 120000) return false;
+
+    const actualText = comparableText(post.text);
+    if (!expectedText) return Boolean(actualText);
+    const signatureLength = Math.min(48, expectedText.length);
+    const signature = expectedText.slice(0, Math.max(1, signatureLength));
+    return actualText.startsWith(signature) || actualText.includes(signature);
   });
-  return matched.length===1?matched[0]:null;
+
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 export function resultFromPost(post) {
-  if (!post?.url) return null;
-  const path = new URL(post.url).pathname.split("/").filter(Boolean);
-  const isDetail = path[0] === "detail";
+  if (!post) return null;
+  const urls = buildWeiboUrls(post);
+  const canonicalUrl = urls.canonicalUrl || String(post.url || "").split("?")[0];
+  if (!canonicalUrl) return null;
   return {
-    id: isDetail ? path[1] || post.id : post.id || "",
-    userId: isDetail ? "" : path[0] || "",
-    bid: isDetail ? "" : path[1] || "",
-    canonicalUrl: post.url.split("?")[0],
-    shareUrl: "",
-    publishedAt: new Date().toISOString(),
-    resolution: "timeline-diff"
+    id: post.id || "",
+    mid: post.mid || "",
+    userId: post.userId || "",
+    bid: post.bid || "",
+    canonicalUrl,
+    shareUrl: urls.shareUrl || "",
+    publishedAt: post.publishedAt || new Date().toISOString(),
+    resolution: post.source || "timeline-diff"
   };
 }
