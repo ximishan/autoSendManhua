@@ -33,23 +33,66 @@ test("微博接口发布正文后使用返回 ID 发送首评", async () => {
   assert.match(calls[1].options.body, /id=123456789/);
 });
 
-test("微博图片上传复用 pic_upload 接口并返回 pid", async () => {
+test("微博图片上传使用原始二进制请求并返回 pid", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asm-weibo-api-"));
   const image = path.join(dir, "a.jpg");
   fs.writeFileSync(image, Buffer.from("jpeg"));
   try {
-    let called = "";
+    let call = null;
     const client = new WeiboApiClient(COOKIE, {
-      fetchImpl: async (url) => {
-        called = String(url);
-        return fakeResponse({ data: { pics: { pic_1: { pid: "image-pid" } } } });
+      binaryPostImpl: async (url, headers, body) => {
+        call = { url, headers, body };
+        return {
+          status: 200,
+          headers: {},
+          text: JSON.stringify({ data: { pics: { pic_1: { pid: "image-pid" } } } })
+        };
       }
     });
-    assert.equal(await client.uploadImage(image), "image-pid");
-    assert.ok(called.startsWith(WEIBO_UPLOAD_URL));
+    const result = await client.uploadImage(image);
+    assert.equal(result.pid, "image-pid");
+    assert.equal(result.transport, "raw-binary");
+    assert.ok(call.url.startsWith(WEIBO_UPLOAD_URL));
+    assert.equal(call.headers["Content-Type"], "image/jpeg");
+    assert.deepEqual(call.body, Buffer.from("jpeg"));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("原始二进制图片请求失败时使用 fetch 兜底", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asm-weibo-api-fallback-"));
+  const image = path.join(dir, "a.png");
+  fs.writeFileSync(image, Buffer.from("png"));
+  try {
+    const client = new WeiboApiClient(COOKIE, {
+      binaryPostImpl: async () => { throw new Error("raw failed"); },
+      fetchImpl: async () => fakeResponse({ data: { pics: { pic_1: { pid: "fallback-pid" } } } })
+    });
+    const result = await client.uploadImage(image);
+    assert.equal(result.pid, "fallback-pid");
+    assert.equal(result.transport, "fetch-fallback");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("publisher 会把图片 pid 作为 pic_id 传给正文接口", async () => {
+  let receivedPicIds = null;
+  const publisher = new WeiboPublisher({
+    cookieText: COOKIE,
+    clientFactory: () => ({
+      async uploadImage() { return { pid: "pid-1", transport: "raw-binary" }; },
+      async publishPost(_content, picIds) {
+        receivedPicIds = picIds;
+        return { info: { id: "123", mid: "123", bid: "", userId: "" }, payload: { ok: 1, data: { id: "123" } } };
+      },
+      async publishComment() { return { ok: 1 }; }
+    })
+  });
+  const result = await publisher.publish({ images: ["a.jpg"], resourceUrl: "" }, { content: "正文" });
+  assert.deepEqual(receivedPicIds, ["pid-1"]);
+  assert.deepEqual(result.evidence.imageIds, ["pid-1"]);
 });
 
 test("首评失败时正文结果仍然成功，不能触发正文重发", async () => {
@@ -59,7 +102,7 @@ test("首评失败时正文结果仍然成功，不能触发正文重发", async
     cookieText: COOKIE,
     checkpoint: (phase) => phases.push(phase),
     clientFactory: () => ({
-      async uploadImage() { return "pid"; },
+      async uploadImage() { return { pid: "pid", transport: "raw-binary" }; },
       async publishPost() {
         postCalls += 1;
         return { info: { id: "987654321", mid: "987654321", bid: "", userId: "" }, payload: { ok: 1, data: { id: "987654321" } } };
