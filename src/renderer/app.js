@@ -1,7 +1,7 @@
 const api=window.autoSend;
 const platforms=['weibo','zhihu','jianshu','baijiahao','toutiao','sohu','netease'];
 const names={weibo:'微博',zhihu:'知乎',jianshu:'简书',baijiahao:'百家号',toutiao:'今日头条',sohu:'搜狐号',netease:'网易号'};
-const pageMeta={tasks:['任务中心','核对每个平台的状态、地址和错误'],create:['新建发布','微博确认后再分发到其他平台'],batch:['批量导入','仅支持 .xlsx，错误行不会进入队列'],accounts:['账号管理','每个账号使用独立登录目录'],templates:['平台模板','预览与实际发布使用相同模板'],logs:['运行日志','记录本地任务步骤和异常'],settings:['设置','保存后立即应用于后续任务']};
+const pageMeta={tasks:['任务中心','核对每个平台的状态、地址和错误'],create:['新建发布','微博确认后再分发到其他平台'],batch:['批量导入','仅支持 .xlsx，错误行不会进入队列'],accounts:['账号管理','微博可直接扫码登录；每个账号使用独立登录目录'],templates:['平台模板','预览与实际发布使用相同模板'],logs:['运行日志','记录本地任务步骤和异常'],settings:['设置','保存后立即应用于后续任务']};
 let state={tasks:[],accounts:[],templates:[],logs:[],queue:{}},selectedImages=[],detailId=null,refreshing=false;
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -22,7 +22,12 @@ function renderTasks(){
   }).join('')||'<tr><td colspan="9">暂无任务</td></tr>';
 }
 function renderAccounts(){
-  $('#account-list').innerHTML=state.accounts.map(a=>'<article class="account-card"><h3>'+esc(a.nickname||a.id)+'</h3><p>'+names[a.platform]+' · '+esc(a.id)+'</p>'+status(a.status)+'<p>平台发布尚需使用本人账号实测</p><div class="account-actions"><button class="secondary small" data-account-open="'+esc(a.id)+'">登录/打开</button><button class="secondary small" data-account-check="'+esc(a.id)+'">测试状态</button><button class="secondary small" data-account-delete="'+esc(a.id)+'">删除</button></div></article>').join('')||'<p>请先添加账号</p>';
+  $('#account-list').innerHTML=state.accounts.map(a=>{
+    const primaryAction=a.platform==='weibo'&&a.status!=='logged_in'
+      ?'<button class="primary small" data-account-weibo-login="'+esc(a.id)+'">扫码登录</button>'
+      :'<button class="secondary small" data-account-open="'+esc(a.id)+'">打开</button>';
+    return '<article class="account-card"><h3>'+esc(a.nickname||a.id)+'</h3><p>'+names[a.platform]+' · '+esc(a.id)+'</p>'+status(a.status)+'<p>'+(a.platform==='weibo'?'登录态会自动保存，下次直接使用':'平台发布尚需使用本人账号实测')+'</p><div class="account-actions">'+primaryAction+'<button class="secondary small" data-account-check="'+esc(a.id)+'">测试状态</button><button class="secondary small" data-account-delete="'+esc(a.id)+'">删除</button></div></article>';
+  }).join('')||'<p>还没有账号。微博直接点击上方“扫码登录微博”即可。</p>';
 }
 function renderTemplates(){
   if($('#template-list').children.length)return;
@@ -50,6 +55,20 @@ async function detail(id){
   }).join('')+'<button class="secondary" data-cancel="'+t.id+'">取消未提交部分</button>';
   if(!$('#task-detail').open)$('#task-detail').showModal();
 }
+async function loginWeibo(accountId=null){
+  const quick=$('#quick-weibo-login');
+  if(!accountId&&quick){quick.disabled=true;quick.textContent='等待扫码…';}
+  $('#weibo-login-tip').textContent='正在打开微博二维码，请使用手机微博 APP → 我的 → 扫一扫。扫码后无需回到命令行，程序会自动识别。';
+  try{
+    const account=await api.quickLoginWeibo(accountId);
+    await refresh();
+    $('#weibo-login-tip').textContent='微博登录成功，登录态已保存。以后发布会自动使用该账号。';
+    toast('微博扫码登录成功');
+    return account;
+  }finally{
+    if(!accountId&&quick){quick.disabled=false;quick.textContent='扫码登录微博';}
+  }
+}
 document.addEventListener('click',event=>{
   const b=event.target.closest('button');if(!b)return;
   safely(async()=>{
@@ -64,13 +83,15 @@ document.addEventListener('click',event=>{
     if(b.dataset.cancel){await api.cancelTask(b.dataset.cancel);await detail(detailId);await refresh();}
     if(b.dataset.reconcile){const id=Number(b.dataset.reconcile);await api.reconcileJob(id,$('#result-'+id).value,$('#confirm-'+id).checked);await detail(detailId);await refresh();}
     if(b.dataset.notPublished&&confirm('请先在平台核对。只有确认本任务未发布，才能重新提交。确定尚未发布吗？')){await api.markNotPublished(Number(b.dataset.notPublished),true);await detail(detailId);await refresh();}
-    if(b.dataset.accountOpen){await api.openAccount(b.dataset.accountOpen);toast('请在浏览器完成登录后测试状态');}
+    if(b.dataset.accountWeiboLogin)await loginWeibo(b.dataset.accountWeiboLogin);
+    if(b.dataset.accountOpen){await api.openAccount(b.dataset.accountOpen);toast('账号窗口已打开');}
     if(b.dataset.accountCheck){await api.checkAccount(b.dataset.accountCheck);await refresh();}
     if(b.dataset.accountDelete&&confirm('删除账号记录？')){const remove=confirm('同时删除该账号的登录目录？取消则保留目录。');await api.deleteAccount(b.dataset.accountDelete,remove);await refresh();}
     if(b.dataset.saveTemplate){await api.saveTemplate(b.dataset.saveTemplate,$('[data-template="'+b.dataset.saveTemplate+'"]').value);await refresh();toast('模板已保存');}
   });
 });
 $('#refresh').onclick=()=>safely(refresh);$('#refresh-logs').onclick=()=>safely(refresh);
+$('#quick-weibo-login').onclick=()=>safely(()=>loginWeibo());
 $('#pick-images').onclick=()=>safely(async()=>{selectedImages=await api.selectImages();$('#image-count').textContent='已选择 '+selectedImages.length+' 张';$('#image-list').innerHTML=selectedImages.map(p=>'<span class="chip">'+esc(p.split(/[\\/]/).pop())+'</span>').join('');});
 $('#preview-task').onclick=()=>safely(async()=>{const preview=await api.previewTask(input());$('#content-preview').innerHTML=preview.map(p=>'<div class="preview-block"><b>'+names[p.platform]+'</b>'+esc(p.content)+'</div>').join('');});
 async function saveTask(run){if(!$('#task-form').reportValidity())return;const t=await api.createTask(input());await refresh();gotoPage('tasks');toast('任务已创建');if(run){await api.runTask(t.id);await refresh();}}
@@ -82,9 +103,14 @@ $('#excel-template').onclick=()=>safely(async()=>{if(await api.saveExcelTemplate
 $('#excel-import').onclick=()=>safely(async()=>{const r=await api.importExcel();if(r){$('#import-result').innerHTML='<p>创建 '+r.created.length+' 条，错误 '+r.invalid.length+' 条</p>'+r.invalid.map(x=>'<p>第 '+x.rowNumber+' 行：'+esc(x.error)+'</p>').join('');await refresh();}});
 $('#add-account').onclick=()=>$('#account-form-wrap').hidden=!$('#account-form-wrap').hidden;
 $('#account-form select').innerHTML=platforms.map(p=>'<option value="'+p+'">'+names[p]+'</option>').join('');
-$('#account-form').onsubmit=e=>{e.preventDefault();safely(async()=>{const f=new FormData(e.target);const a=await api.saveAccount(Object.fromEntries(f));await refresh();await api.openAccount(a.id);});};
+$('#account-form').onsubmit=e=>{e.preventDefault();safely(async()=>{const f=new FormData(e.target);const a=await api.saveAccount(Object.fromEntries(f));await refresh();if(a.platform==='weibo')await loginWeibo(a.id);else await api.openAccount(a.id);});};
 $('#save-settings').onclick=()=>safely(async()=>{await api.setSetting('retry.maxAttempts',Number($('#setting-attempts').value));await api.setSetting('queue.intervalMs',Number($('#setting-delay').value));await api.setSetting('weibo.preferShareUrl',$('#setting-share').checked);await api.setSetting('logs.retentionDays',Number($('#setting-retention').value));await refresh();toast('设置已生效');});
 $('#close-detail').onclick=()=>$('#task-detail').close();
 api.onLog(()=>safely(refresh));
+api.onAccountLoginProgress(entry=>{
+  if(entry.platform!=='weibo')return;
+  const text={opening_qr:'正在打开微博二维码…',waiting_scan:'二维码已打开，请用手机微博扫一扫并确认登录。',logged_in:'扫码成功，微博登录态已保存。',failed:entry.message||'微博登录失败，请重新扫码。'}[entry.status];
+  if(text)$('#weibo-login-tip').textContent=text;
+});
 refresh().catch(e=>toast(e.message,true));
 setInterval(()=>{if(document.visibilityState==='visible')safely(refresh);},2000);
