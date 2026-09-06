@@ -6,7 +6,6 @@
   <title>autoSendManhua</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="v1.css">
-  <link rel="stylesheet" href="weibo-auth.css">
 </head>
 <body>
   <div class="app-shell">
@@ -53,11 +52,10 @@
       <section class="page" id="page-accounts">
         <div class="panel">
           <div class="panel-head">
-            <div><h2>账号管理</h2><p>微博账号直接复用 baidu-link-converter 的“Chrome 快捷方式 + Cookie”登录方式。</p></div>
-            <div><button class="primary small" id="import-weibo-shortcuts">导入微博账号目录</button><button class="secondary small" id="add-account">+ 添加其他平台账号</button></div>
+            <div><h2>账号管理</h2><p>微博直接扫码登录。每个账号使用独立的真实 Chrome Profile 保存登录状态。</p></div>
+            <div><button class="primary small" id="quick-weibo-login">扫码登录微博</button><button class="secondary small" id="add-account">+ 添加其他平台账号</button></div>
           </div>
-          <div id="weibo-login-tip" class="hint">先选择保存微博 Chrome 快捷方式的目录。每个 .lnk 代表一个独立账号；打开账号完成登录后，为该账号保存微博 Cookie（支持完整 Cookie、Copy as cURL、Cookie-Editor JSON）。</div>
-          <div id="weibo-shortcuts-path" class="shortcut-path">尚未选择微博快捷方式目录</div>
+          <div id="weibo-login-tip" class="hint">点击“扫码登录微博”后会自动打开微博。使用手机微博 APP → 我的 → 扫一扫；手机确认后程序会自动识别登录 Cookie 并保存，不需要复制 Cookie，也不需要再点“测试状态”。</div>
           <div id="account-form-wrap" hidden><form id="account-form" class="inline-form"><input name="id" required placeholder="账号 ID，如 zhihu_01"><select name="platform" required></select><input name="nickname" placeholder="显示昵称"><button class="primary">保存并打开登录</button></form></div>
           <div class="account-grid" id="account-list"></div>
         </div>
@@ -67,25 +65,11 @@
 
       <section class="page" id="page-logs"><div class="panel"><div class="panel-head"><h2>运行日志</h2><button class="secondary small" id="refresh-logs">刷新</button></div><div class="log-view" id="log-list"></div></div></section>
 
-      <section class="page" id="page-settings"><div class="panel form-panel narrow"><div class="panel-head"><h2>队列与浏览器设置</h2></div><label>默认单 job 最大尝试次数<input id="setting-attempts" type="number" min="1" max="3" value="2"></label><label>队列任务间隔（毫秒）<input id="setting-delay" type="number" min="0" value="1500"></label><label>日志保留天数（超过天数自动清理）<input id="setting-retention" type="number" min="1" max="365" value="30"></label><label class="switch-row"><span>优先使用已验证的微博 shareUrl</span><input id="setting-share" type="checkbox" checked></label><button class="primary" id="save-settings">保存设置</button><p class="hint">微博登录信息只保存在本机 data 目录，不会显示到前端页面。</p></div></section>
+      <section class="page" id="page-settings"><div class="panel form-panel narrow"><div class="panel-head"><h2>队列与浏览器设置</h2></div><label>默认单 job 最大尝试次数<input id="setting-attempts" type="number" min="1" max="3" value="2"></label><label>队列任务间隔（毫秒）<input id="setting-delay" type="number" min="0" value="1500"></label><label>日志保留天数（超过天数自动清理）<input id="setting-retention" type="number" min="1" max="365" value="30"></label><label class="switch-row"><span>优先使用已验证的微博 shareUrl</span><input id="setting-share" type="checkbox" checked></label><button class="primary" id="save-settings">保存设置</button><p class="hint">微博扫码后的登录信息只保存在本机 Profile/data 目录，不会提交到 GitHub。</p></div></section>
     </main>
   </div>
 
   <dialog id="task-detail"><button id="close-detail" class="secondary">关闭</button><div id="detail-content"></div></dialog>
-
-  <dialog id="weibo-cookie-dialog" class="auth-dialog">
-    <form method="dialog" id="weibo-cookie-form">
-      <div class="auth-dialog-head">
-        <div><h2 id="weibo-cookie-title">配置微博登录信息</h2><p>与 baidu-link-converter 一致，只要求 Cookie 中包含 SUB 与 XSRF-TOKEN。</p></div>
-        <button type="button" class="secondary small" id="close-weibo-cookie">关闭</button>
-      </div>
-      <label>微博 Cookie
-        <textarea id="weibo-cookie-input" rows="9" placeholder="支持完整 Cookie 文本、Copy as cURL、Cookie-Editor 导出的 JSON"></textarea>
-      </label>
-      <p class="auth-note">Cookie 只保存到本机 data/weibo_credentials.json。页面不会回显已经保存的 Cookie。</p>
-      <div class="auth-dialog-actions"><button type="button" class="secondary" id="open-weibo-from-cookie">先打开这个微博账号</button><button class="primary" type="submit">保存登录信息</button></div>
-    </form>
-  </dialog>
 
   <script src="app.js"></script>
 </body>
