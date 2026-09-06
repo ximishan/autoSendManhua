@@ -37,7 +37,7 @@
           <form class="panel form-panel" id="task-form"><div class="panel-head"><div><h2>内容任务</h2><p>微博会先发布；取得帖子链接后才会启动下游平台。</p></div></div>
             <label>标题<input name="title" maxlength="100" required placeholder="请输入标题"></label>
             <label>正文<textarea name="content" rows="10" required placeholder="请输入正文"></textarea></label>
-            <label>资源链接<input name="resourceUrl" type="url" placeholder="https://pan.example.com/..."></label>
+            <label>资源链接 / 资源信息<textarea name="resourceUrl" rows="3" placeholder="支持一个或多个网盘链接，例如：K：https://pan.quark.cn/s/xxxx  D：https://pan.baidu.com/s/xxxx?pwd=1111"></textarea><small class="hint">支持同一行或换行填写多个链接，并保留 K:、D:、夸克:、百度: 等说明；微博会把这里的内容发到首评。</small></label>
             <label>图片<div class="file-row"><button type="button" class="secondary" id="pick-images">选择图片</button><span id="image-count">未选择图片</span></div><div id="image-list" class="chips"></div></label>
             <label>微博账号<select name="weiboAccount" id="weibo-account" required><option value="">请选择</option></select></label>
             <fieldset><legend>分发平台</legend><div class="checks" id="platform-checks"></div></fieldset>
@@ -47,7 +47,7 @@
         </div>
       </section>
 
-      <section class="page" id="page-batch"><div class="panel empty-action"><div class="feature-icon">XL</div><h2>Excel 批量任务</h2><p>导入前逐行检查必填列、图片、URL、平台和账号。错误行不会进入队列。</p><div><button class="secondary" id="excel-template">下载导入模板</button><button class="primary" id="excel-import">选择 Excel 并校验</button></div><div id="import-result"></div></div></section>
+      <section class="page" id="page-batch"><div class="panel empty-action"><div class="feature-icon">XL</div><h2>Excel 批量任务</h2><p>导入前逐行检查必填列、图片、资源链接、平台和账号。resource_url 支持多个网盘链接。错误行不会进入队列。</p><div><button class="secondary" id="excel-template">下载导入模板</button><button class="primary" id="excel-import">选择 Excel 并校验</button></div><div id="import-result"></div></div></section>
 
       <section class="page" id="page-accounts">
         <div class="panel">
@@ -61,7 +61,7 @@
         </div>
       </section>
 
-      <section class="page" id="page-templates"><div class="panel"><div class="panel-head"><div><h2>平台模板</h2><p>支持 {title}、{content}、{weiboUrl}、{date}；只有微博可使用 {resourceUrl}。</p></div></div><div id="template-list" class="template-list"></div></div></section>
+      <section class="page" id="page-templates"><div class="panel"><div class="panel-head"><div><h2>平台模板</h2><p>支持 {title}、{content}、{weiboUrl}、{date}；微博资源信息默认通过首评发送。</p></div></div><div id="template-list" class="template-list"></div></section>
 
       <section class="page" id="page-logs"><div class="panel"><div class="panel-head"><h2>运行日志</h2><button class="secondary small" id="refresh-logs">刷新</button></div><div class="log-view" id="log-list"></div></div></section>
 
