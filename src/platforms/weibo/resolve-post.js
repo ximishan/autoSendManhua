@@ -101,12 +101,13 @@ export function buildWeiboUrls({ userId, bid, id, mid, shareUrl }) {
   return { canonicalUrl, shareUrl: normalizeShareUrl(shareUrl) };
 }
 
-function postKey(post) {
-  if (post?.mid) return `mid:${post.mid}`;
-  if (post?.id) return `id:${post.id}`;
-  if (post?.userId && post?.bid) return `bid:${post.userId}:${post.bid}`;
-  if (post?.url) return `url:${String(post.url).split("?")[0]}`;
-  return "";
+function postKeys(post) {
+  const keys = [];
+  if (post?.mid) keys.push(`mid:${post.mid}`);
+  if (post?.id) keys.push(`id:${post.id}`);
+  if (post?.userId && post?.bid) keys.push(`bid:${post.userId}:${post.bid}`);
+  if (post?.url) keys.push(`url:${String(post.url).split("?")[0]}`);
+  return keys;
 }
 
 function comparableText(value) {
@@ -201,7 +202,7 @@ export async function captureRecentPosts(page, selectors) {
 }
 
 export function matchNewPost(beforePosts, afterPosts, task, publishedAt = Date.now()) {
-  const beforeKeys = new Set(beforePosts.map(postKey).filter(Boolean));
+  const beforeKeys = new Set(beforePosts.flatMap(postKeys));
   const uid = String(task.userId || task.weiboUserId || "");
   const clickedAt = Number(publishedAt);
   if (!isNumericId(uid) || !Number.isFinite(clickedAt)) return null;
@@ -209,8 +210,8 @@ export function matchNewPost(beforePosts, afterPosts, task, publishedAt = Date.n
   const expectedText = comparableText(task.content);
   const expectedImages = task.images?.length || 0;
   const candidates = afterPosts.filter((post) => {
-    const key = postKey(post);
-    if (!key || beforeKeys.has(key)) return false;
+    const keys = postKeys(post);
+    if (!keys.length || keys.some(key => beforeKeys.has(key))) return false;
     if (String(post.userId || "") !== uid) return false;
     if (Number(post.imageCount ?? -1) !== expectedImages) return false;
     const time = Date.parse(post.publishedAt);
