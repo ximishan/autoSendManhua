@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("autoSend", {
   continueTask: (id) => ipcRenderer.invoke("task:continue", id),
   pauseTask: (id) => ipcRenderer.invoke("task:pause", id),
   saveAccount: (account) => ipcRenderer.invoke("account:save", account),
+  quickLoginWeibo: (accountId) => ipcRenderer.invoke("account:weibo-qr-login", accountId || null),
   checkAccount: (id) => ipcRenderer.invoke("account:check", id),
   openAccount: (id) => ipcRenderer.invoke("account:open", id),
   deleteAccount: (id, deleteProfile) => ipcRenderer.invoke("account:delete", id, deleteProfile),
@@ -27,5 +28,6 @@ contextBridge.exposeInMainWorld("autoSend", {
   exportExcel: () => ipcRenderer.invoke("excel:export"),
   saveExcelTemplate: () => ipcRenderer.invoke("excel:template"),
   openUrl: (url) => ipcRenderer.invoke("shell:open", url),
-  onLog: (callback) => ipcRenderer.on("log:entry", (_, entry) => callback(entry))
+  onLog: (callback) => ipcRenderer.on("log:entry", (_, entry) => callback(entry)),
+  onAccountLoginProgress: (callback) => ipcRenderer.on("account:login-progress", (_, entry) => callback(entry))
 });
