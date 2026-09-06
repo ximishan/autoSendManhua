@@ -1,227 +1,110 @@
 import { PlatformPublisher } from "../base-publisher.js";
-import { AppError, PublishUncertainError } from "../../core/errors.js";
-import { fillEditable, requireAttached, requireVisible } from "../helpers.js";
-import { readWeiboIdentity, openWeiboHome } from "./session.js";
-import { publishApiPattern, selectors } from "./selectors.js";
-import { toPlaywrightCookies, validateWeiboCookie } from "./shortcut-auth.js";
-import {
-  buildWeiboUrls,
-  captureRecentPosts,
-  captureRecentPostsViaApi,
-  extractWeiboIdentifiers,
-  matchNewPost,
-  resultFromPost
-} from "./resolve-post.js";
+import { LoginRequiredError } from "../../core/errors.js";
+import { validateWeiboCookie } from "./shortcut-auth.js";
+import { WeiboApiClient, WEIBO_COMMENT_URL, WEIBO_POST_URL, WEIBO_UPLOAD_URL } from "./api-client.js";
 
 export class WeiboPublisher extends PlatformPublisher {
   constructor(options = {}) {
     super({ ...options, platform: "weibo" });
-    this.selectors = options.selectors || selectors;
-    this.responseTimeoutMs = options.responseTimeoutMs || 20000;
     this.cookieText = options.cookieText || "";
-    this.cookiesApplied = false;
-  }
-
-  async getPage() {
-    if (this.page) return this.page;
-    const session = await this.browserManager.getSession("weibo", this.account?.id || "default", {
-      profileDir: this.account?.profile_path || undefined
-    });
-    if (this.cookieText && !this.cookiesApplied) {
-      await session.context.addCookies(toPlaywrightCookies(this.cookieText));
-      this.cookiesApplied = true;
-    }
-    this.page = session.page;
-    return this.page;
+    this.clientFactory = options.clientFactory || ((cookieText) => new WeiboApiClient(cookieText));
   }
 
   async checkLogin() {
-    const page = await this.getPage();
-    await openWeiboHome(page);
-    const identity = await readWeiboIdentity(page);
-    this.userId = identity?.uid || "";
-    if (this.userId) return true;
-
-    // 与 baidu-link-converter 一致：微博账号以本机已保存的 SUB + XSRF-TOKEN
-    // 作为登录配置依据，不再要求新版微博页面必须返回固定的 /ajax/config 结构。
-    if (this.cookieText) {
-      try {
-        validateWeiboCookie(this.cookieText);
-        return true;
-      } catch {}
-    }
-    return false;
-  }
-
-  async snapshotBeforePublish(page) {
-    const apiPosts = await captureRecentPostsViaApi(page, this.userId);
-    if (apiPosts.length) return apiPosts;
-
-    this.profileUrl = this.userId ? `https://weibo.com/u/${this.userId}` : "";
-    if (this.profileUrl) {
-      await page.goto(this.profileUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-      return captureRecentPosts(page, this.selectors);
-    }
-    return [];
-  }
-
-  async openComposer(task) {
-    const page = await this.getPage();
-    this.profileUrl = this.userId ? `https://weibo.com/u/${this.userId}` : "";
-    this.beforePosts = await this.snapshotBeforePublish(page);
-    await openWeiboHome(page);
-    this.composer = await requireVisible(page, this.selectors.composer, "微博正文编辑器", 20000);
-    const forms = this.composer.locator("xpath=ancestor::form[1]");
-    this.composerScope = await forms.count() ? forms : this.composer.locator("xpath=..");
-    return this.composer;
-  }
-
-  async fillContent(task, rendered) {
-    if (!this.composer) await this.openComposer(task);
-    await fillEditable(this.composer, rendered.content);
-    const value = await this.composer.inputValue().catch(() => this.composer.innerText().catch(() => ""));
-    if (!value.trim()) throw new AppError("微博正文写入失败", { code: "CONTENT_FILL_FAILED", retryable: true });
-  }
-
-  async uploadImages(task) {
-    if (!task.images?.length) return;
-    const page = await this.getPage();
-    const input = await requireAttached(this.composerScope, this.selectors.imageInput, "微博图片上传控件", 15000);
-    await input.setInputFiles(task.images);
-    const started = Date.now();
-    while (Date.now() - started < 60000) {
-      let count = 0;
-      this.guard();
-      for (const selector of this.selectors.imagePreview) {
-        count = Math.max(count, await this.composerScope.locator(selector)
-          .evaluateAll(imgs => imgs.filter(i => i.complete && i.naturalWidth > 0).length)
-          .catch(() => 0));
-      }
-      if (count >= task.images.length) return;
-      await page.waitForTimeout(500);
-    }
-    throw new AppError(`微博图片上传超时，预期 ${task.images.length} 张`, { code: "IMAGE_UPLOAD_TIMEOUT", retryable: true });
-  }
-
-  async submit() {
-    const page = await this.getPage();
-    const submit = await requireVisible(this.composerScope || page, this.selectors.submit, "微博发布按钮", 15000);
-    if (await submit.isDisabled().catch(() => false)) {
-      throw new AppError("微博发布按钮不可用", { code: "SUBMIT_DISABLED" });
-    }
-
-    const responses = [];
-    const pending = [];
-    const handler = response => {
-      let url;
-      try { url = new URL(response.url()); } catch { return; }
-      if (!WEIBO_API_HOSTS.has(url.hostname) || !publishApiPattern.test(url.pathname) || response.request().method() !== "POST") return;
-      pending.push((async () => {
-        if (response.status() < 200 || response.status() >= 300) return;
-        const payload = await response.json().catch(() => null);
-        if (payload?.ok !== 1) return;
-        const parsed = extractWeiboIdentifiers(payload, this.userId);
-        if (parsed) responses.push(parsed);
-      })());
-    };
-
-    page.on("response", handler);
-    const clickedAt = Date.now();
     try {
-      this.checkpoint("submitting", { clickedAt, userId: this.userId });
-      await submit.click();
-      const deadline = Date.now() + this.responseTimeoutMs;
-      while (Date.now() < deadline) {
-        await Promise.all(pending);
-        const apiResult = this.userId
-          ? responses.find(result => result?.userId === this.userId)
-          : responses[0];
-        if (apiResult) {
-          if (!this.userId) this.userId = apiResult.userId;
-          return {
-            strongSignal: true,
-            apiResult,
-            clickedAt,
-            evidence: { submitted: true, id: apiResult.id, mid: apiResult.mid, bid: apiResult.bid, userId: apiResult.userId }
-          };
-        }
-        await page.waitForTimeout(200);
-      }
-      return { strongSignal: false, clickedAt, evidence: { submitted: true, userId: this.userId } };
-    } finally {
-      page.off("response", handler);
-      await Promise.allSettled(pending);
+      validateWeiboCookie(this.cookieText);
+      return true;
+    } catch {
+      return false;
     }
   }
 
-  async resolvePublishedUrl(task, submitResult, rendered) {
-    if (submitResult.apiResult && (!this.userId || submitResult.apiResult.userId === this.userId)) {
-      if (!this.userId) this.userId = submitResult.apiResult.userId;
-      const urls = buildWeiboUrls(submitResult.apiResult);
-      if (urls.canonicalUrl) {
-        return {
-          success: true,
+  async publish(task, rendered) {
+    this.guard();
+    if (!await this.checkLogin()) throw new LoginRequiredError("weibo");
+
+    const client = this.clientFactory(this.cookieText);
+    const imageIds = [];
+
+    for (const filePath of task.images || []) {
+      this.guard();
+      this.logger?.info?.("微博：上传图片", {
+        platform: "weibo",
+        details: { filePath, endpoint: WEIBO_UPLOAD_URL }
+      });
+      imageIds.push(await client.uploadImage(filePath));
+    }
+
+    this.guard();
+    // 与 baidu-link-converter 一致：真正调用正文接口前立即进入 submitting。
+    // 从这一刻起，任何异常都不能自动重发正文。
+    this.checkpoint("submitting", {
+      submitted: false,
+      transport: "baidu-link-converter-api",
+      endpoint: WEIBO_POST_URL,
+      imageIds
+    });
+
+    const publishedAt = new Date().toISOString();
+    const { info, payload: postResponse } = await client.publishPost(rendered.content, imageIds);
+    const canonicalUrl = `https://weibo.com/detail/${info.id}`;
+
+    this.checkpoint("submitted", {
+      submitted: true,
+      transport: "baidu-link-converter-api",
+      endpoint: WEIBO_POST_URL,
+      postId: info.id,
+      imageIds
+    });
+
+    // baidu-link-converter 的已验证流程：资源链接放首评。
+    // 首评失败不能让正文再次发送，因此这里只记录失败，不抛出导致正文重试。
+    let commentStatus = "skipped";
+    let commentError = "";
+    let commentResponse = null;
+    const commentContent = task.resourceUrl ? `链接：${task.resourceUrl}` : "";
+    if (commentContent) {
+      try {
+        commentResponse = await client.publishComment(info.id, commentContent);
+        commentStatus = "published";
+      } catch (error) {
+        commentStatus = "failed";
+        commentError = error.message || String(error);
+        this.logger?.warn?.("微博：正文已发布，但首评失败；禁止重复发送正文", {
           platform: "weibo",
-          id: submitResult.apiResult.id,
-          mid: submitResult.apiResult.mid,
-          bid: submitResult.apiResult.bid,
-          userId: submitResult.apiResult.userId,
-          ...urls,
-          publishedAt: new Date().toISOString(),
-          resolution: "publish-response",
-          evidence: { submitted: true, resolvedBy: "publish-response" }
-        };
+          details: { postId: info.id, error: commentError, endpoint: WEIBO_COMMENT_URL }
+        });
       }
     }
 
-    const page = await this.getPage();
-    const matchTask = {
-      ...task,
-      content: rendered?.content || task.content,
-      userId: this.userId
+    return {
+      success: true,
+      platform: "weibo",
+      id: info.id,
+      mid: info.mid,
+      bid: info.bid,
+      userId: info.userId,
+      canonicalUrl,
+      shareUrl: canonicalUrl,
+      publishedAt,
+      resolution: "baidu-link-converter-api",
+      evidence: {
+        submitted: true,
+        transport: "baidu-link-converter-api",
+        postEndpoint: WEIBO_POST_URL,
+        uploadEndpoint: WEIBO_UPLOAD_URL,
+        commentEndpoint: WEIBO_COMMENT_URL,
+        imageIds,
+        commentStatus,
+        commentError
+      },
+      raw: {
+        postResponse,
+        commentResponse,
+        imageIds,
+        commentStatus,
+        commentError
+      }
     };
-    const deadline = Date.now() + 35000;
-
-    while (Date.now() < deadline) {
-      const apiPosts = await captureRecentPostsViaApi(page, this.userId);
-      if (apiPosts.length) {
-        const matched = matchNewPost(this.beforePosts || [], apiPosts, matchTask, submitResult.clickedAt);
-        const result = resultFromPost(matched);
-        if (result) {
-          return {
-            success: true,
-            platform: "weibo",
-            ...result,
-            resolution: "profile-api-diff",
-            evidence: { submitted: true, resolvedBy: "profile-api-diff" }
-          };
-        }
-      }
-
-      if (this.profileUrl) {
-        await page.goto(this.profileUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-        const domPosts = await captureRecentPosts(page, this.selectors);
-        const matched = matchNewPost(this.beforePosts || [], domPosts, matchTask, submitResult.clickedAt);
-        const result = resultFromPost(matched);
-        if (result) {
-          return {
-            success: true,
-            platform: "weibo",
-            ...result,
-            resolution: "profile-dom-diff",
-            evidence: { submitted: true, resolvedBy: "profile-dom-diff" }
-          };
-        }
-      }
-
-      await page.waitForTimeout(1500);
-    }
-
-    if (!submitResult.strongSignal) {
-      throw new PublishUncertainError("微博", "已点击发布，但未从发布响应或本人主页唯一确认刚发布微博；禁止自动重发");
-    }
-    throw new PublishUncertainError("微博", "发布接口已显示成功，但微博详情 URL 尚未唯一确认；禁止自动重发");
   }
 }
-
-const WEIBO_API_HOSTS = new Set(["weibo.com", "www.weibo.com"]);
