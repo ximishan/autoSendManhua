@@ -4,7 +4,8 @@ const ALLOWED_VARIABLES = new Set(["title", "content", "resourceUrl", "weiboUrl"
 const VARIABLE_PATTERN = /\{([A-Za-z][A-Za-z0-9]*)\}/g;
 
 export const DEFAULT_TEMPLATES = {
-  weibo: "{content}\n\n{resourceUrl}",
+  // 微博发布复用 baidu-link-converter 已验证流程：正文只发内容，resourceUrl 由发布器写入首评。
+  weibo: "{content}",
   zhihu: "{content}\n\n更多内容：{weiboUrl}",
   jianshu: "{content}\n\n更多内容：{weiboUrl}",
   baijiahao: "{content}\n\n更多内容：{weiboUrl}",
