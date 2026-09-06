@@ -50,7 +50,15 @@
       <section class="page" id="page-batch"><div class="panel empty-action"><div class="feature-icon">XL</div><h2>Excel 批量任务</h2><p>导入前逐行检查必填列、图片、URL、平台和账号。错误行不会进入队列。</p><div><button class="secondary" id="excel-template">下载导入模板</button><button class="primary" id="excel-import">选择 Excel 并校验</button></div><div id="import-result"></div></div></section>
 
       <section class="page" id="page-accounts">
-        <div class="panel"><div class="panel-head"><div><h2>账号与独立 Profile</h2><p>每个平台、每个账号均使用隔离的浏览器登录态。</p></div><button class="primary small" id="add-account">+ 添加账号</button></div><div id="account-form-wrap" hidden><form id="account-form" class="inline-form"><input name="id" required placeholder="账号 ID，如 wb_01"><select name="platform" required></select><input name="nickname" placeholder="显示昵称"><button class="primary">保存并打开登录</button></form></div><div class="account-grid" id="account-list"></div></div>
+        <div class="panel">
+          <div class="panel-head">
+            <div><h2>账号管理</h2><p>普通客户直接扫码即可。每个账号仍使用独立 Profile 保存登录态。</p></div>
+            <div><button class="primary small" id="quick-weibo-login">扫码登录微博</button><button class="secondary small" id="add-account">+ 添加其他平台账号</button></div>
+          </div>
+          <div id="weibo-login-tip" class="hint">点击“扫码登录微博”，程序会自动打开二维码。使用手机微博 APP → 我的 → 扫一扫，确认后会自动保存登录状态。</div>
+          <div id="account-form-wrap" hidden><form id="account-form" class="inline-form"><input name="id" required placeholder="账号 ID，如 zhihu_01"><select name="platform" required></select><input name="nickname" placeholder="显示昵称"><button class="primary">保存并打开登录</button></form></div>
+          <div class="account-grid" id="account-list"></div>
+        </div>
       </section>
 
       <section class="page" id="page-templates"><div class="panel"><div class="panel-head"><div><h2>平台模板</h2><p>支持 {title}、{content}、{weiboUrl}、{date}；只有微博可使用 {resourceUrl}。</p></div></div><div id="template-list" class="template-list"></div></div></section>
