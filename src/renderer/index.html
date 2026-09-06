@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>autoSendManhua</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="v1.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">漫</span><div><strong>autoSendManhua</strong><small>微博前置 · 多平台分发</small></div></div>
+      <nav id="nav">
+        <button class="nav-item active" data-page="tasks">任务中心</button>
+        <button class="nav-item" data-page="create">新建发布</button>
+        <button class="nav-item" data-page="batch">批量导入</button>
+        <button class="nav-item" data-page="accounts">账号管理</button>
+        <button class="nav-item" data-page="templates">平台模板</button>
+        <button class="nav-item" data-page="logs">运行日志</button>
+        <button class="nav-item" data-page="settings">设置</button>
+      </nav>
+      <div class="queue-card"><span id="queue-dot"></span><div><b id="queue-state">队列已暂停</b><small id="queue-task">没有正在执行的任务</small></div></div>
+    </aside>
+
+    <main>
+      <header class="topbar"><div><h1 id="page-title">任务中心</h1><p id="page-desc">查看微博前置及各平台发布状态</p></div><div class="top-actions"><button class="secondary" id="refresh">刷新</button><button class="primary" data-goto="create">+ 新建发布</button></div></header>
+      <div id="toast" class="toast" hidden></div>
+
+      <section class="page active" id="page-tasks">
+        <div class="stats" id="task-stats"></div>
+        <div class="panel"><div class="panel-head"><h2>发布任务</h2><div><button class="secondary small" id="queue-toggle">启动队列</button><button class="secondary small" id="export-results">导出结果</button></div></div><div class="table-wrap"><table><thead><tr><th>任务</th><th>微博</th><th>微博链接</th><th>知乎</th><th>简书</th><th>百家号</th><th>头条</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="task-list"></tbody></table></div></div>
+      </section>
+
+      <section class="page" id="page-create">
+        <div class="form-grid">
+          <form class="panel form-panel" id="task-form"><div class="panel-head"><div><h2>内容任务</h2><p>微博会先发布；取得帖子链接后才会启动下游平台。</p></div></div>
+            <label>标题<input name="title" maxlength="100" required placeholder="请输入标题"></label>
+            <label>正文<textarea name="content" rows="10" required placeholder="请输入正文"></textarea></label>
+            <label>资源链接<input name="resourceUrl" type="url" placeholder="https://pan.example.com/..."></label>
+            <label>图片<div class="file-row"><button type="button" class="secondary" id="pick-images">选择图片</button><span id="image-count">未选择图片</span></div><div id="image-list" class="chips"></div></label>
+            <label>微博账号<select name="weiboAccount" id="weibo-account" required><option value="">请选择</option></select></label>
+            <fieldset><legend>分发平台</legend><div class="checks" id="platform-checks"></div></fieldset>
+            <div class="submit-row"><button type="button" class="secondary" id="preview-task">预览正文</button><button type="button" class="secondary" id="save-draft">保存到队列</button><button class="primary" type="submit">创建并开始发布</button></div>
+          </form>
+          <div class="panel preview-panel"><div class="panel-head"><h2>平台正文预览</h2></div><div id="content-preview" class="preview-empty">填写内容后点击“预览正文”</div></div>
+        </div>
+      </section>
+
+      <section class="page" id="page-batch"><div class="panel empty-action"><div class="feature-icon">XL</div><h2>Excel 批量任务</h2><p>导入前逐行检查必填列、图片、URL、平台和账号。错误行不会进入队列。</p><div><button class="secondary" id="excel-template">下载导入模板</button><button class="primary" id="excel-import">选择 Excel 并校验</button></div><div id="import-result"></div></div></section>
+
+      <section class="page" id="page-accounts">
+        <div class="panel"><div class="panel-head"><div><h2>账号与独立 Profile</h2><p>每个平台、每个账号均使用隔离的浏览器登录态。</p></div><button class="primary small" id="add-account">+ 添加账号</button></div><div id="account-form-wrap" hidden><form id="account-form" class="inline-form"><input name="id" required placeholder="账号 ID，如 wb_01"><select name="platform" required></select><input name="nickname" placeholder="显示昵称"><button class="primary">保存并打开登录</button></form></div><div class="account-grid" id="account-list"></div></div>
+      </section>
+
+      <section class="page" id="page-templates"><div class="panel"><div class="panel-head"><div><h2>平台模板</h2><p>支持 {title}、{content}、{weiboUrl}、{date}；只有微博可使用 {resourceUrl}。</p></div></div><div id="template-list" class="template-list"></div></div></section>
+
+      <section class="page" id="page-logs"><div class="panel"><div class="panel-head"><h2>运行日志</h2><button class="secondary small" id="refresh-logs">刷新</button></div><div class="log-view" id="log-list"></div></div></section>
+
+      <section class="page" id="page-settings"><div class="panel form-panel narrow"><div class="panel-head"><h2>队列与浏览器设置</h2></div><label>默认单 job 最大尝试次数<input id="setting-attempts" type="number" min="1" max="3" value="2"></label><label>队列任务间隔（毫秒）<input id="setting-delay" type="number" min="0" value="1500"></label><label>日志保留天数（超过天数自动清理）<input id="setting-retention" type="number" min="1" max="365" value="30"></label><label class="switch-row"><span>优先使用已验证的微博 shareUrl</span><input id="setting-share" type="checkbox" checked></label><button class="primary" id="save-settings">保存设置</button><p class="hint">验证码、二维码或登录失效不会自动绕过，任务会进入“需处理”。</p></div></section>
+    </main>
+  </div>
+  <dialog id="task-detail"><button id="close-detail" class="secondary">关闭</button><div id="detail-content"></div></dialog>
+  <script src="app.js"></script>
+</body>
+</html>

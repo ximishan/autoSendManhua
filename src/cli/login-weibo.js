@@ -4,7 +4,8 @@ import { openPersistentBrowser } from "../browser/profile-manager.js";
 import { detectWeiboLogin, openWeiboHome } from "../platforms/weibo/session.js";
 
 async function main() {
-  const session = await openPersistentBrowser("weibo");
+  const accountId = process.argv[2] || "default";
+  const session = await openPersistentBrowser("weibo", { accountId });
   const rl = readline.createInterface({ input, output });
 
   try {
@@ -17,7 +18,7 @@ async function main() {
       return;
     }
 
-    console.log("微博登录窗口已打开，请在浏览器中完成登录。登录状态会保存在 .profiles/weibo。 ");
+    console.log(`微博登录窗口已打开，请完成账号 ${accountId} 登录。登录状态会保存在 .profiles/weibo/${accountId}。`);
     await rl.question("登录完成后按回车检测状态...");
 
     await openWeiboHome(session.page);

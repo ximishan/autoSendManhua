@@ -1,0 +1,31 @@
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("autoSend", {
+  snapshot: () => ipcRenderer.invoke("app:snapshot"),
+  getTask: id=>ipcRenderer.invoke('task:get',id),
+  cancelTask: id=>ipcRenderer.invoke('task:cancel',id),
+  previewTask: input=>ipcRenderer.invoke('task:preview',input),
+  reconcileJob: (id,url,confirmed)=>ipcRenderer.invoke('task:reconcile',id,url,confirmed),
+  markNotPublished: (id,confirmed)=>ipcRenderer.invoke('task:not-published',id,confirmed),
+  createTask: (input) => ipcRenderer.invoke("task:create", input),
+  runTask: (id) => ipcRenderer.invoke("task:run", id),
+  retryTask: (id) => ipcRenderer.invoke("task:retry", id),
+  continueTask: (id) => ipcRenderer.invoke("task:continue", id),
+  pauseTask: (id) => ipcRenderer.invoke("task:pause", id),
+  saveAccount: (account) => ipcRenderer.invoke("account:save", account),
+  checkAccount: (id) => ipcRenderer.invoke("account:check", id),
+  openAccount: (id) => ipcRenderer.invoke("account:open", id),
+  deleteAccount: (id, deleteProfile) => ipcRenderer.invoke("account:delete", id, deleteProfile),
+  saveTemplate: (platform, content) => ipcRenderer.invoke("template:save", platform, content),
+  getSetting: (key, fallback) => ipcRenderer.invoke("settings:get", key, fallback),
+  setSetting: (key, value) => ipcRenderer.invoke("settings:set", key, value),
+  queueStart: () => ipcRenderer.invoke("queue:start"),
+  queuePause: () => ipcRenderer.invoke("queue:pause"),
+  queueResume: () => ipcRenderer.invoke("queue:resume"),
+  selectImages: () => ipcRenderer.invoke("dialog:images"),
+  importExcel: () => ipcRenderer.invoke("excel:import"),
+  exportExcel: () => ipcRenderer.invoke("excel:export"),
+  saveExcelTemplate: () => ipcRenderer.invoke("excel:template"),
+  openUrl: (url) => ipcRenderer.invoke("shell:open", url),
+  onLog: (callback) => ipcRenderer.on("log:entry", (_, entry) => callback(entry))
+});

@@ -1,13 +1,30 @@
 {
   "name": "auto-send-manhua",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
+  "main": "src/main/electron-main.js",
   "description": "微博前置的多平台漫画/资源图文分发工具",
   "scripts": {
-    "login:weibo": "node src/cli/login-weibo.js"
+    "start": "electron .",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "audit:core": "node scripts/audit-core.mjs",
+    "audit:ui": "node scripts/audit-ui.mjs",
+    "test:browser": "node scripts/browser-fixture.mjs",
+    "diagnose": "node src/cli/diagnose.js",
+    "smoke:ui": "node test/electron-smoke.mjs",
+    "login": "node src/cli/login-platform.js",
+    "login:weibo": "node src/cli/login-weibo.js",
+    "smoke": "node src/cli/smoke-local.js",
+    "run:task": "node src/cli/run-task.js",
+    "import:excel": "node src/cli/import-excel.js"
   },
   "dependencies": {
+    "electron": "^44.2.0",
+    "exceljs": "^4.4.0",
     "playwright": "^1.53.2"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

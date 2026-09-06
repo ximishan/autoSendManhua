@@ -1,0 +1,11 @@
+.checks{grid-template-columns:repeat(2,1fr)}
+.checks label{border:1px solid var(--line);padding:10px;border-radius:8px}
+.checks span{display:block}
+.status.submitted,.status.awaiting_review,.status.needs_action{background:#fff0d6;color:#8c5710}
+dialog{border:1px solid #ddd;border-radius:12px;width:min(850px,90vw);max-height:85vh;overflow:auto;padding:24px}
+dialog::backdrop{background:#171b2d88}
+.job-detail{border-top:1px solid #ddd;margin-top:18px;padding:12px 0;word-break:break-word}
+.job-detail label{display:block;margin:12px 0}
+.job-detail input[type=url]{width:100%;padding:9px;border:1px solid #bbb;border-radius:6px}
+.job-detail input[type=checkbox]{margin-right:8px}
+.job-detail button{margin:5px}

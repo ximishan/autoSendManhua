@@ -2,6 +2,13 @@ node_modules/
 .profiles/
 data/
 logs/
+imports/
+exports/
+*.log
+playwright-report/
+test-results/
+data/
+logs/
 *.log
 .DS_Store
 Thumbs.db

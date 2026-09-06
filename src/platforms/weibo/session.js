@@ -9,35 +9,20 @@ export async function openWeiboHome(page) {
 }
 
 export async function detectWeiboLogin(page) {
-  const currentUrl = page.url();
-  if (/passport\.weibo\.com|login\.sina\.com\.cn/.test(currentUrl)) {
-    return false;
-  }
+  const identity=await readWeiboIdentity(page);
+  return Boolean(identity);
+}
 
-  const loginSignals = [
-    "text=登录",
-    "text=注册",
-    "input[placeholder*='手机号']",
-    "input[placeholder*='邮箱']"
-  ];
-
-  for (const selector of loginSignals) {
-    if (await page.locator(selector).count().catch(() => 0)) {
-      const visible = await page.locator(selector).first().isVisible().catch(() => false);
-      if (visible) return false;
-    }
-  }
-
-  const loggedInSignals = [
-    "a[href*='/u/']",
-    "a[href*='/profile']",
-    "[class*='avatar']",
-    "[class*='woo-avatar']"
-  ];
-
-  for (const selector of loggedInSignals) {
-    if (await page.locator(selector).count().catch(() => 0)) return true;
-  }
-
+export async function readWeiboIdentity(page) {
+  try {
+    if(!['weibo.com','www.weibo.com'].includes(new URL(page.url()).hostname))return null;
+    const payload=await page.evaluate(async()=>{
+      const response=await fetch('/ajax/config',{credentials:'same-origin',signal:AbortSignal.timeout(15000)});
+      return response.ok?await response.json():null;
+    });
+    if(!payload)return null;
+    const data=payload.data;
+    if(payload.ok===1 && (data?.login===true || data?.login===1) && /^\d+$/.test(String(data.uid))) return {uid:String(data.uid)};
+  }catch{}
   return null;
 }
