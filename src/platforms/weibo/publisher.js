@@ -9,8 +9,6 @@ export function buildWeiboResourceComment(resourceText) {
   if (!text) return "";
   const links = extractResourceLinks(text);
   if (!links.length) return "";
-  // 单个纯 URL 延续 baidu-link-converter 的“链接：URL”格式；
-  // 多链接或带 K:/D:/百度:/夸克: 等说明时，原样保留用户输入。
   if (links.length === 1 && text === links[0]) return `链接：${text}`;
   return text;
 }
@@ -37,24 +35,50 @@ export class WeiboPublisher extends PlatformPublisher {
 
     const client = this.clientFactory(this.cookieText);
     const imageIds = [];
+    const imageUploads = [];
+
+    this.logger?.info?.(`微博：准备发布，图片 ${task.images?.length || 0} 张`, {
+      platform: "weibo",
+      details: { imageCount: task.images?.length || 0 }
+    });
 
     for (const filePath of task.images || []) {
       this.guard();
-      this.logger?.info?.("微博：上传图片", {
+      this.logger?.info?.("微博：开始上传图片", {
         platform: "weibo",
         details: { filePath, endpoint: WEIBO_UPLOAD_URL }
       });
-      imageIds.push(await client.uploadImage(filePath));
+      const uploaded = await client.uploadImage(filePath);
+      const pid = typeof uploaded === "string" ? uploaded : uploaded?.pid;
+      if (!pid) throw new Error(`微博图片上传未返回 PID：${filePath}`);
+      imageIds.push(String(pid));
+      imageUploads.push({
+        filePath,
+        pid: String(pid),
+        transport: typeof uploaded === "string" ? "legacy" : uploaded.transport || "unknown"
+      });
+      this.logger?.info?.("微博：图片上传成功", {
+        platform: "weibo",
+        details: imageUploads[imageUploads.length - 1]
+      });
     }
 
     this.guard();
-    // 与 baidu-link-converter 一致：真正调用正文接口前立即进入 submitting。
-    // 从这一刻起，任何异常都不能自动重发正文。
     this.checkpoint("submitting", {
       submitted: false,
       transport: "baidu-link-converter-api",
       endpoint: WEIBO_POST_URL,
-      imageIds
+      imageIds,
+      imageUploads
+    });
+
+    this.logger?.info?.("微博：发送正文", {
+      platform: "weibo",
+      details: {
+        endpoint: WEIBO_POST_URL,
+        imageCount: imageIds.length,
+        picId: imageIds.join(",")
+      }
     });
 
     const publishedAt = new Date().toISOString();
@@ -66,11 +90,10 @@ export class WeiboPublisher extends PlatformPublisher {
       transport: "baidu-link-converter-api",
       endpoint: WEIBO_POST_URL,
       postId: info.id,
-      imageIds
+      imageIds,
+      imageUploads
     });
 
-    // baidu-link-converter 的已验证流程：资源链接放首评。
-    // 首评失败不能让正文再次发送，因此这里只记录失败，不抛出导致正文重试。
     let commentStatus = "skipped";
     let commentError = "";
     let commentResponse = null;
@@ -107,6 +130,7 @@ export class WeiboPublisher extends PlatformPublisher {
         uploadEndpoint: WEIBO_UPLOAD_URL,
         commentEndpoint: WEIBO_COMMENT_URL,
         imageIds,
+        imageUploads,
         resourceLinks: extractResourceLinks(task.resourceUrl),
         commentStatus,
         commentError
@@ -115,6 +139,7 @@ export class WeiboPublisher extends PlatformPublisher {
         postResponse,
         commentResponse,
         imageIds,
+        imageUploads,
         resourceText: task.resourceUrl || "",
         resourceLinks: extractResourceLinks(task.resourceUrl),
         commentStatus,
