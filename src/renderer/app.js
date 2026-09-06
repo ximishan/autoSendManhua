@@ -8,7 +8,7 @@ const pageMeta = {
   tasks: ["任务中心", "核对每个平台的状态、地址和错误"],
   create: ["新建发布", "微博确认后再分发到其他平台"],
   batch: ["批量导入", "仅支持 .xlsx，错误行不会进入队列"],
-  accounts: ["账号管理", "微博复用 Chrome 快捷方式与本机 Cookie 登录"],
+  accounts: ["账号管理", "微博直接扫码登录，登录态自动保存"],
   templates: ["平台模板", "预览与实际发布使用相同模板"],
   logs: ["运行日志", "记录本地任务步骤和异常"],
   settings: ["设置", "保存后立即应用于后续任务"]
@@ -18,7 +18,6 @@ let state = { tasks: [], accounts: [], templates: [], logs: [], queue: {}, setti
 let selectedImages = [];
 let detailId = null;
 let refreshing = false;
-let weiboCookieAccountId = null;
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? "").replace(/[&<>'"]/g, char => ({
@@ -94,24 +93,17 @@ function renderTasks() {
 }
 
 function renderAccounts() {
-  const pathBox = $("#weibo-shortcuts-path");
-  if (pathBox) {
-    pathBox.textContent = state.settings?.weiboShortcutsDir
-      ? `当前微博快捷方式目录：${state.settings.weiboShortcutsDir}`
-      : "尚未选择微博快捷方式目录";
-  }
-
   $("#account-list").innerHTML = state.accounts.map(account => {
     if (account.platform === "weibo") {
       return `<article class="account-card">
         <h3>${esc(account.nickname || account.id)}</h3>
         <p>微博 · ${esc(account.id)}</p>
         ${status(account.status)}
-        <p>${account.status === "logged_in" ? "已保存微博 Cookie，可直接用于发布" : "先打开该账号登录微博，再保存登录信息"}</p>
+        <p>${account.status === "logged_in" ? "扫码登录状态已保存，后续发布会直接复用" : "点击扫码登录，手机确认后程序会自动保存登录状态"}</p>
         <div class="account-actions">
-          <button class="secondary small" data-weibo-open="${esc(account.id)}">打开微博</button>
-          <button class="primary small" data-weibo-cookie="${esc(account.id)}">${account.status === "logged_in" ? "更新登录信息" : "保存登录信息"}</button>
-          <button class="secondary small" data-account-check="${esc(account.id)}">测试状态</button>
+          <button class="primary small" data-account-weibo-login="${esc(account.id)}">${account.status === "logged_in" ? "重新扫码" : "扫码登录"}</button>
+          <button class="secondary small" data-account-open="${esc(account.id)}">打开微博</button>
+          <button class="secondary small" data-account-check="${esc(account.id)}">检测状态</button>
           <button class="secondary small" data-account-delete="${esc(account.id)}">删除</button>
         </div>
       </article>`;
@@ -127,7 +119,7 @@ function renderAccounts() {
         <button class="secondary small" data-account-delete="${esc(account.id)}">删除</button>
       </div>
     </article>`;
-  }).join("") || '<p>还没有账号。微博点击上方“导入微博账号目录”。</p>';
+  }).join("") || '<p>还没有账号。点击上方“扫码登录微博”即可添加第一个微博账号。</p>';
 }
 
 function renderTemplates() {
@@ -206,14 +198,25 @@ async function detail(id) {
   if (!$("#task-detail").open) $("#task-detail").showModal();
 }
 
-function openWeiboCookieDialog(accountId) {
-  const account = state.accounts.find(item => item.id === accountId);
-  if (!account) throw new Error("微博账号不存在");
-  weiboCookieAccountId = accountId;
-  $("#weibo-cookie-title").textContent = `配置微博登录信息 · ${account.nickname || account.id}`;
-  $("#weibo-cookie-input").value = "";
-  if (!$("#weibo-cookie-dialog").open) $("#weibo-cookie-dialog").showModal();
-  $("#weibo-cookie-input").focus();
+async function loginWeibo(accountId = null) {
+  const quick = $("#quick-weibo-login");
+  if (!accountId && quick) {
+    quick.disabled = true;
+    quick.textContent = "等待扫码…";
+  }
+  $("#weibo-login-tip").textContent = "正在打开微博二维码，请使用手机微博 APP → 我的 → 扫一扫。手机确认后程序会自动识别并保存，不需要再点检测。";
+  try {
+    const account = await api.quickLoginWeibo(accountId);
+    await refresh();
+    $("#weibo-login-tip").textContent = "微博登录成功，登录态和发布所需凭据已自动保存。下次直接使用即可。";
+    toast("微博扫码登录成功");
+    return account;
+  } finally {
+    if (!accountId && quick) {
+      quick.disabled = false;
+      quick.textContent = "扫码登录微博";
+    }
+  }
 }
 
 async function saveTask(run) {
@@ -250,12 +253,11 @@ document.addEventListener("click", event => {
       await api.markNotPublished(Number(button.dataset.notPublished), true);
       await detail(detailId); await refresh();
     }
-    if (button.dataset.weiboOpen) { await api.openWeiboShortcut(button.dataset.weiboOpen); toast("已用该账号的 Chrome 快捷方式打开微博"); }
-    if (button.dataset.weiboCookie) openWeiboCookieDialog(button.dataset.weiboCookie);
+    if (button.dataset.accountWeiboLogin) await loginWeibo(button.dataset.accountWeiboLogin);
     if (button.dataset.accountOpen) { await api.openAccount(button.dataset.accountOpen); toast("账号窗口已打开"); }
     if (button.dataset.accountCheck) { await api.checkAccount(button.dataset.accountCheck); await refresh(); }
     if (button.dataset.accountDelete && confirm("删除账号记录？")) {
-      const remove = confirm("同时删除本工具内部的登录目录？取消则保留。");
+      const remove = confirm("同时删除该账号的登录目录？取消则保留。");
       await api.deleteAccount(button.dataset.accountDelete, remove);
       await refresh();
     }
@@ -269,12 +271,7 @@ document.addEventListener("click", event => {
 
 $("#refresh").onclick = () => safely(refresh);
 $("#refresh-logs").onclick = () => safely(refresh);
-$("#import-weibo-shortcuts").onclick = () => safely(async () => {
-  const result = await api.importWeiboShortcuts();
-  if (!result) return;
-  await refresh();
-  toast(`已识别 ${result.count} 个微博账号`);
-});
+$("#quick-weibo-login").onclick = () => safely(() => loginWeibo());
 
 $("#pick-images").onclick = () => safely(async () => {
   selectedImages = await api.selectImages();
@@ -316,26 +313,6 @@ $("#account-form").onsubmit = event => {
   });
 };
 
-$("#weibo-cookie-form").onsubmit = event => {
-  event.preventDefault();
-  safely(async () => {
-    if (!weiboCookieAccountId) throw new Error("未选择微博账号");
-    const cookie = $("#weibo-cookie-input").value.trim();
-    if (!cookie) throw new Error("请粘贴微博 Cookie");
-    await api.saveWeiboCookie(weiboCookieAccountId, cookie);
-    $("#weibo-cookie-dialog").close();
-    weiboCookieAccountId = null;
-    await refresh();
-    toast("微博登录信息已保存");
-  });
-};
-$("#close-weibo-cookie").onclick = () => { $("#weibo-cookie-dialog").close(); weiboCookieAccountId = null; };
-$("#open-weibo-from-cookie").onclick = () => safely(async () => {
-  if (!weiboCookieAccountId) throw new Error("未选择微博账号");
-  await api.openWeiboShortcut(weiboCookieAccountId);
-  toast("已打开该微博账号");
-});
-
 $("#save-settings").onclick = () => safely(async () => {
   await api.setSetting("retry.maxAttempts", Number($("#setting-attempts").value));
   await api.setSetting("queue.intervalMs", Number($("#setting-delay").value));
@@ -347,5 +324,16 @@ $("#save-settings").onclick = () => safely(async () => {
 $("#close-detail").onclick = () => $("#task-detail").close();
 
 api.onLog(() => safely(refresh));
+api.onAccountLoginProgress(entry => {
+  if (entry.platform !== "weibo") return;
+  const messages = {
+    opening_qr: "正在打开微博登录页面…",
+    waiting_scan: "二维码已打开，请使用手机微博 APP 扫码并确认登录…",
+    logged_in: "扫码成功，正在自动保存登录状态…",
+    failed: entry.message || "微博扫码登录失败"
+  };
+  $("#weibo-login-tip").textContent = messages[entry.status] || $("#weibo-login-tip").textContent;
+});
+
 refresh().catch(error => toast(error.message, true));
 setInterval(() => { if (document.visibilityState === "visible") safely(refresh); }, 2000);
