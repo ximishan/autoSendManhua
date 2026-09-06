@@ -13,11 +13,12 @@
 - [x] 任务模型、工作流、结果模型、重试策略、日志基础
 - [x] 模板引擎与微博 URL 注入能力
 - [x] 浏览器 Profile / Persistent Context 基础
-- [x] 微博登录改为复用 `baidu-link-converter` 的 Chrome 快捷方式 + Cookie 方案
-- [x] 微博快捷方式目录扫描：每个 `.lnk` 识别为一个独立账号
-- [x] 微博账号可按原 Chrome 快捷方式直接打开
-- [x] 微博 Cookie 支持完整文本 / Copy as cURL / Cookie-Editor JSON
-- [x] 微博登录凭据校验 `SUB + XSRF-TOKEN` 并仅保存在本机
+- [x] 微博账号一键扫码登录入口
+- [x] 微博每个账号自动使用独立真实 Chrome Persistent Profile
+- [x] 扫码成功后根据浏览器 Profile 中的微博 Cookie 判定登录，不依赖固定 `/ajax/config` 返回结构
+- [x] 复用 `baidu-link-converter` 的微博凭据标准：`SUB + XSRF-TOKEN`
+- [x] 扫码成功后自动提取并保存微博发布凭据，客户无需手动复制 Cookie
+- [x] 微博登录凭据仅保存在本机 `data/weibo_credentials.json`
 - [x] 微博发布器可把已保存 Cookie 注入独立 Playwright 会话
 - [x] 微博发布器代码（正文、图片、点击发布）
 - [x] 微博结果解析基础
@@ -27,12 +28,12 @@
 - [x] 通用下游浏览器发布器
 - [x] Excel xlsx 导入与逐行校验
 - [x] Electron smoke / workflow / database / template / Excel / 微博 resolver 测试基础
-- [x] 微博 Cookie 解析单元测试
+- [x] 微博 Cookie 解析与 Cookie 登录 helper 单元测试
 
 ## 二、部分完成，尚未真实验收
 
-- [ ] Windows 本机真实验收：导入现有微博快捷方式目录并识别账号
-- [ ] Windows 本机真实验收：保存一个账号 Cookie，重启后仍保持“已登录”
+- [ ] Windows 本机真实验收：点击“扫码登录微博”后，扫码成功自动显示“已登录”
+- [ ] Windows 本机真实验收：关闭并重启程序后登录状态仍可复用
 - [ ] 微博完整发布闭环：代码已加固，仍需真实账号验证“能发、能拿到本次刚发布微博的正确详情链接”
 - [ ] 微博 → 知乎完整真实链路
 - [ ] 简书真实发布
@@ -78,7 +79,7 @@
 
 ### P0
 
-1. [x] 微博登录逻辑切换为 baidu-link-converter 已使用的快捷方式 + Cookie 方案，待本机验收
+1. [x] 微博登录代码改为“一键扫码 + Cookie 自动判定/保存”，待 Windows 本机验收
 2. [x] 微博“发布成功 → 稳定识别刚发布微博 URL”代码已完成加固，待真实账号验收
 3. [ ] 修复提交后禁止自动重发
 4. [ ] 修复暂停 / 恢复 / 账号锁 / 队列一致性
@@ -96,7 +97,7 @@
 | 里程碑 | 当前状态 |
 |---|---|
 | M0 项目骨架 | 部分完成 |
-| M1 微博闭环 | 登录与 URL 解析代码加固完成，待真实验收 |
+| M1 微博闭环 | 扫码登录与 URL 解析代码加固完成，待真实验收 |
 | M2 微博 → 知乎 | 未验收 |
 | M3 六个平台分发 | 原型 |
 | M4 Electron / SQLite | 部分完成 |
