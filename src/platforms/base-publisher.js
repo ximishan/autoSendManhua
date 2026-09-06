@@ -30,6 +30,6 @@ export class PlatformPublisher {
     this.guard();
     const submitResult = await this.submit(task);
     this.checkpoint('resolving',submitResult.evidence || {});
-    return this.resolvePublishedUrl(task, submitResult);
+    return this.resolvePublishedUrl(task, submitResult, rendered);
   }
 }
