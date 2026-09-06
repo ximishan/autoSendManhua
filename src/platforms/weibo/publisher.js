@@ -3,6 +3,7 @@ import { AppError, PublishUncertainError } from "../../core/errors.js";
 import { fillEditable, requireAttached, requireVisible } from "../helpers.js";
 import { readWeiboIdentity, openWeiboHome } from "./session.js";
 import { publishApiPattern, selectors } from "./selectors.js";
+import { toPlaywrightCookies, validateWeiboCookie } from "./shortcut-auth.js";
 import {
   buildWeiboUrls,
   captureRecentPosts,
@@ -17,6 +18,8 @@ export class WeiboPublisher extends PlatformPublisher {
     super({ ...options, platform: "weibo" });
     this.selectors = options.selectors || selectors;
     this.responseTimeoutMs = options.responseTimeoutMs || 20000;
+    this.cookieText = options.cookieText || "";
+    this.cookiesApplied = false;
   }
 
   async getPage() {
@@ -24,6 +27,10 @@ export class WeiboPublisher extends PlatformPublisher {
     const session = await this.browserManager.getSession("weibo", this.account?.id || "default", {
       profileDir: this.account?.profile_path || undefined
     });
+    if (this.cookieText && !this.cookiesApplied) {
+      await session.context.addCookies(toPlaywrightCookies(this.cookieText));
+      this.cookiesApplied = true;
+    }
     this.page = session.page;
     return this.page;
   }
@@ -32,8 +39,18 @@ export class WeiboPublisher extends PlatformPublisher {
     const page = await this.getPage();
     await openWeiboHome(page);
     const identity = await readWeiboIdentity(page);
-    this.userId = identity?.uid;
-    return Boolean(this.userId);
+    this.userId = identity?.uid || "";
+    if (this.userId) return true;
+
+    // 与 baidu-link-converter 一致：微博账号以本机已保存的 SUB + XSRF-TOKEN
+    // 作为登录配置依据，不再要求新版微博页面必须返回固定的 /ajax/config 结构。
+    if (this.cookieText) {
+      try {
+        validateWeiboCookie(this.cookieText);
+        return true;
+      } catch {}
+    }
+    return false;
   }
 
   async snapshotBeforePublish(page) {
@@ -116,13 +133,16 @@ export class WeiboPublisher extends PlatformPublisher {
       const deadline = Date.now() + this.responseTimeoutMs;
       while (Date.now() < deadline) {
         await Promise.all(pending);
-        const apiResult = responses.find(result => result?.userId === this.userId);
+        const apiResult = this.userId
+          ? responses.find(result => result?.userId === this.userId)
+          : responses[0];
         if (apiResult) {
+          if (!this.userId) this.userId = apiResult.userId;
           return {
             strongSignal: true,
             apiResult,
             clickedAt,
-            evidence: { submitted: true, id: apiResult.id, mid: apiResult.mid, bid: apiResult.bid, userId: this.userId }
+            evidence: { submitted: true, id: apiResult.id, mid: apiResult.mid, bid: apiResult.bid, userId: apiResult.userId }
           };
         }
         await page.waitForTimeout(200);
@@ -135,7 +155,8 @@ export class WeiboPublisher extends PlatformPublisher {
   }
 
   async resolvePublishedUrl(task, submitResult, rendered) {
-    if (submitResult.apiResult?.userId === this.userId) {
+    if (submitResult.apiResult && (!this.userId || submitResult.apiResult.userId === this.userId)) {
+      if (!this.userId) this.userId = submitResult.apiResult.userId;
       const urls = buildWeiboUrls(submitResult.apiResult);
       if (urls.canonicalUrl) {
         return {
