@@ -103,13 +103,19 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS idx_logs_task ON app_logs(task_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_accounts_platform ON accounts(platform, enabled);
     `
-  }
-  ,{
+  },
+  {
     version: 2,
     sql: `ALTER TABLE publish_jobs ADD COLUMN phase TEXT NOT NULL DEFAULT 'unknown';
       ALTER TABLE publish_jobs ADD COLUMN evidence TEXT NOT NULL DEFAULT '{}';
       ALTER TABLE publish_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_running_account ON publish_jobs(account_id) WHERE status='running' AND account_id IS NOT NULL;`
+  },
+  {
+    version: 3,
+    sql: `ALTER TABLE weibo_results ADD COLUMN account_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE weibo_results ADD COLUMN resolution TEXT NOT NULL DEFAULT '';
+      ALTER TABLE weibo_results ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}';`
   }
 ];
 
