@@ -106,17 +106,24 @@ export async function writeImportTemplate(filePath) {
   const rows = [{
     title: "示例标题",
     content: "示例正文",
-    resource_url: "https://pan.example.com/example",
+    resource_url: "K：https://pan.quark.cn/s/example  D：https://pan.baidu.com/s/example?pwd=1111",
     images: "D:/images/1.jpg;D:/images/2.jpg",
     platforms: "zhihu;jianshu;baijiahao;toutiao",
     weibo_account: "wb_01",
     zhihu_account: "zh_01",
-    jianshu_account: "js_01"
-    ,baijiahao_account:'bj_01',toutiao_account:'tt_01',sohu_account:'sh_01',netease_account:'wy_01'
+    jianshu_account: "js_01",
+    baijiahao_account: "bj_01",
+    toutiao_account: "tt_01",
+    sohu_account: "sh_01",
+    netease_account: "wy_01"
   }];
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("任务导入");
-  sheet.columns = Object.keys(rows[0]).map((key) => ({ header: key, key, width: key === "content" || key === "images" ? 42 : 22 }));
+  sheet.columns = Object.keys(rows[0]).map((key) => ({
+    header: key,
+    key,
+    width: key === "resource_url" ? 58 : key === "content" || key === "images" ? 42 : 22
+  }));
   rows.forEach((row) => sheet.addRow(row));
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: "frozen", ySplit: 1 }];
